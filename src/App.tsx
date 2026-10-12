@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   INITIAL_DAILY_RECORDS,
   DailyRFRecord,
@@ -15,11 +15,69 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  Save,
+  Check,
+  Clock,
+  Edit3,
 } from 'lucide-react';
 
+const STORAGE_KEY = 'rf_performance_web_autosave_v1';
+
+interface PersistedWebState {
+  records: DailyRFRecord[];
+  selectedDate: string;
+  autoSaveEnabled: boolean;
+  inlineEditEnabled: boolean;
+  lastSavedAt: string;
+  saveCount: number;
+}
+
+function formatThaiTime(date: Date): string {
+  return date.toLocaleTimeString('th-TH', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 export default function App() {
-  const [records, setRecords] = useState<DailyRFRecord[]>(INITIAL_DAILY_RECORDS);
-  const [selectedDate, setSelectedDate] = useState<string>('10/10/2026');
+  // Load initial state from Web localStorage if available
+  const initialLoaded = useMemo((): PersistedWebState | null => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as PersistedWebState;
+      if (Array.isArray(parsed.records) && parsed.records.length > 0) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [records, setRecords] = useState<DailyRFRecord[]>(
+    () => initialLoaded?.records || INITIAL_DAILY_RECORDS
+  );
+  const [selectedDate, setSelectedDate] = useState<string>(
+    () => initialLoaded?.selectedDate || '10/10/2026'
+  );
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(
+    () => initialLoaded?.autoSaveEnabled ?? true
+  );
+  const [inlineEditEnabled, setInlineEditEnabled] = useState<boolean>(
+    () => initialLoaded?.inlineEditEnabled ?? true
+  );
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>(
+    'saved'
+  );
+  const [lastSavedAt, setLastSavedAt] = useState<string>(
+    () => initialLoaded?.lastSavedAt || formatThaiTime(new Date())
+  );
+  const [saveCount, setSaveCount] = useState<number>(
+    () => initialLoaded?.saveCount || 1
+  );
+
   const [statusFilter, setStatusFilter] = useState<
     'all' | 'Achieved' | 'Below target'
   >('all');
@@ -36,10 +94,111 @@ export default function App() {
     'เพิ่มกำลังคนเสริมสถานี RF-A และปรับสมดุล Line B'
   );
 
+  const isFirstMount = useRef(true);
+
+  // Persist helper
+  const persistToWebStorage = (
+    nextRecords: DailyRFRecord[],
+    nextSelectedDate: string,
+    nextAutoSave: boolean,
+    nextInlineEdit: boolean
+  ) => {
+    try {
+      const nowStr = formatThaiTime(new Date());
+      const nextCount = saveCount + 1;
+      const payload: PersistedWebState = {
+        records: nextRecords,
+        selectedDate: nextSelectedDate,
+        autoSaveEnabled: nextAutoSave,
+        inlineEditEnabled: nextInlineEdit,
+        lastSavedAt: nowStr,
+        saveCount: nextCount,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      setLastSavedAt(nowStr);
+      setSaveCount(nextCount);
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('unsaved');
+    }
+  };
+
+  // Auto-Save Effect whenever records, selectedDate, or inlineEditEnabled change
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    if (!autoSaveEnabled) {
+      setSaveStatus('unsaved');
+      return;
+    }
+
+    setSaveStatus('saving');
+    const timer = window.setTimeout(() => {
+      persistToWebStorage(
+        records,
+        selectedDate,
+        autoSaveEnabled,
+        inlineEditEnabled
+      );
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [records, selectedDate, autoSaveEnabled, inlineEditEnabled]);
+
+  const handleManualSaveNow = () => {
+    setSaveStatus('saving');
+    persistToWebStorage(
+      records,
+      selectedDate,
+      autoSaveEnabled,
+      inlineEditEnabled
+    );
+  };
+
+  const handleToggleAutoSave = () => {
+    const nextState = !autoSaveEnabled;
+    setAutoSaveEnabled(nextState);
+    if (nextState) {
+      persistToWebStorage(records, selectedDate, true, inlineEditEnabled);
+    } else {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as PersistedWebState;
+          parsed.autoSaveEnabled = false;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      } catch {
+        // ignore storage error
+      }
+    }
+  };
+
   const { dailyRecord, mtdAverages, rows } = useMemo(
     () => computeSummaryRows(records, selectedDate),
     [records, selectedDate]
   );
+
+  // Inline update handler for any field of a specific date record
+  const handleUpdateRecordField = (
+    targetDate: string,
+    field: 'uphA' | 'uphB' | 'upphAll' | 'idleTimePct' | 'shiftNote',
+    value: number | string
+  ) => {
+    setRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.date !== targetDate) return rec;
+        const updated = { ...rec, [field]: value };
+        if (field === 'uphA' || field === 'uphB') {
+          updated.uphAll = Math.round((updated.uphA + updated.uphB) / 2);
+        }
+        return updated;
+      })
+    );
+  };
 
   const handleExportCSV = () => {
     const headers = ['Date Group', 'Topic', 'Target', 'Actual', 'Gap', 'Status'];
@@ -72,6 +231,13 @@ export default function App() {
     setSelectedDate('10/10/2026');
     setStatusFilter('all');
     setSearchQuery('');
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    setLastSavedAt(formatThaiTime(new Date()));
+    setSaveStatus('saved');
   };
 
   const handleSaveDailyRecord = (e: React.FormEvent) => {
@@ -192,8 +358,88 @@ export default function App() {
         id="top"
         className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-8 space-y-10"
       >
-        {/* Workspace Control Bar & Headline */}
+        {/* Workspace Control Bar, Auto-Save Panel & Headline */}
         <section className="space-y-6">
+          {/* Web Auto-Save Control Bar */}
+          <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Auto-Save Toggle Switch */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoSaveEnabled}
+                onClick={handleToggleAutoSave}
+                className={`inline-flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  autoSaveEnabled
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                <span
+                  className={`w-7 h-4 rounded-full p-0.5 transition-colors flex items-center ${
+                    autoSaveEnabled ? 'bg-emerald-600 justify-end' : 'bg-slate-400 justify-start'
+                  }`}
+                >
+                  <span className="w-3 h-3 rounded-full bg-white block" />
+                </span>
+                <span>
+                  โหมดบันทึกอัตโนมัติบน Web (Auto-Save):{' '}
+                  <strong>{autoSaveEnabled ? 'เปิดใช้งาน (ON)' : 'ปิดชั่วคราว (OFF)'}</strong>
+                </span>
+              </button>
+
+              {/* Save Status & Timestamp */}
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                {saveStatus === 'saving' ? (
+                  <span className="inline-flex items-center gap-1.5 text-blue-700 font-medium">
+                    <Clock className="w-3.5 h-3.5" />
+                    กำลังบันทึกข้อมูลลงเบราว์เซอร์อัตโนมัติ...
+                  </span>
+                ) : saveStatus === 'saved' ? (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                    <Check className="w-3.5 h-3.5" />
+                    บันทึกอัตโนมัติล่าสุดเมื่อ{' '}
+                    <span className="font-mono font-semibold">{lastSavedAt}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2 text-amber-700 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    มีการแก้ไขที่ยังไม่ได้บันทึก (โหมด Auto-Save ปิดอยู่)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Right Controls inside Auto-Save Bar */}
+            <div className="flex flex-wrap items-center gap-2">
+              {!autoSaveEnabled && (
+                <button
+                  type="button"
+                  onClick={handleManualSaveNow}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  บันทึกตอนนี้ (Save Now)
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setInlineEditEnabled((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  inlineEditEnabled
+                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                {inlineEditEnabled
+                  ? 'แก้ไขตัวเลขในตารางได้ทันที: เปิด'
+                  : 'แก้ไขตัวเลขในตารางได้ทันที: ปิด'}
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -251,10 +497,17 @@ export default function App() {
                 <span className="font-semibold text-slate-700">
                   UPH-A ({dailyRecord.date})
                 </span>
-                <span className="inline-flex items-center gap-1 font-medium text-amber-700">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  Below target
-                </span>
+                {dailyRecord.uphA >= RF_TARGETS.uphA ? (
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Achieved
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-medium text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Below target
+                  </span>
+                )}
               </div>
               <div className="mt-3 flex items-baseline justify-between">
                 <div className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
@@ -263,14 +516,29 @@ export default function App() {
                 <div className="text-xs font-mono tabular-nums text-right">
                   <span className="text-slate-500">Target: {RF_TARGETS.uphA}</span>
                   <span className="mx-1.5 text-slate-300">·</span>
-                  <span className="font-bold text-red-600">
-                    Gap {dailyRecord.uphA - RF_TARGETS.uphA}
+                  <span
+                    className={`font-bold ${
+                      dailyRecord.uphA - RF_TARGETS.uphA >= 0
+                        ? 'text-emerald-700'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    Gap{' '}
+                    {dailyRecord.uphA - RF_TARGETS.uphA > 0
+                      ? `+${dailyRecord.uphA - RF_TARGETS.uphA}`
+                      : dailyRecord.uphA - RF_TARGETS.uphA}
                   </span>
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
                 <span>Oct&apos;2026 MTD: {mtdAverages.uphA}</span>
-                <span className="text-red-600">
+                <span
+                  className={
+                    mtdAverages.uphA - RF_TARGETS.uphA >= 0
+                      ? 'text-emerald-700'
+                      : 'text-red-600'
+                  }
+                >
                   Gap {mtdAverages.uphA - RF_TARGETS.uphA}
                 </span>
               </div>
@@ -282,10 +550,17 @@ export default function App() {
                 <span className="font-semibold text-slate-700">
                   UPH-B ({dailyRecord.date})
                 </span>
-                <span className="inline-flex items-center gap-1 font-medium text-amber-700">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  Below target
-                </span>
+                {dailyRecord.uphB >= RF_TARGETS.uphB ? (
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Achieved
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-medium text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Below target
+                  </span>
+                )}
               </div>
               <div className="mt-3 flex items-baseline justify-between">
                 <div className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
@@ -294,14 +569,29 @@ export default function App() {
                 <div className="text-xs font-mono tabular-nums text-right">
                   <span className="text-slate-500">Target: {RF_TARGETS.uphB}</span>
                   <span className="mx-1.5 text-slate-300">·</span>
-                  <span className="font-bold text-red-600">
-                    Gap {dailyRecord.uphB - RF_TARGETS.uphB}
+                  <span
+                    className={`font-bold ${
+                      dailyRecord.uphB - RF_TARGETS.uphB >= 0
+                        ? 'text-emerald-700'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    Gap{' '}
+                    {dailyRecord.uphB - RF_TARGETS.uphB > 0
+                      ? `+${dailyRecord.uphB - RF_TARGETS.uphB}`
+                      : dailyRecord.uphB - RF_TARGETS.uphB}
                   </span>
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
                 <span>Oct&apos;2026 MTD: {mtdAverages.uphB}</span>
-                <span className="text-red-600">
+                <span
+                  className={
+                    mtdAverages.uphB - RF_TARGETS.uphB >= 0
+                      ? 'text-emerald-700'
+                      : 'text-red-600'
+                  }
+                >
                   Gap {mtdAverages.uphB - RF_TARGETS.uphB}
                 </span>
               </div>
@@ -313,10 +603,17 @@ export default function App() {
                 <span className="font-semibold text-slate-700">
                   UPPH All line ({dailyRecord.date})
                 </span>
-                <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Achieved
-                </span>
+                {dailyRecord.upphAll >= RF_TARGETS.upphAll ? (
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Achieved
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-medium text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Below target
+                  </span>
+                )}
               </div>
               <div className="mt-3 flex items-baseline justify-between">
                 <div className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
@@ -327,8 +624,16 @@ export default function App() {
                     Target: {RF_TARGETS.upphAll.toFixed(2)}
                   </span>
                   <span className="mx-1.5 text-slate-300">·</span>
-                  <span className="font-bold text-emerald-700">
-                    Gap +{(dailyRecord.upphAll - RF_TARGETS.upphAll).toFixed(2)}
+                  <span
+                    className={`font-bold ${
+                      dailyRecord.upphAll >= RF_TARGETS.upphAll
+                        ? 'text-emerald-700'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    Gap{' '}
+                    {dailyRecord.upphAll - RF_TARGETS.upphAll >= 0 ? '+' : ''}
+                    {(dailyRecord.upphAll - RF_TARGETS.upphAll).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -346,10 +651,17 @@ export default function App() {
                 <span className="font-semibold text-slate-700">
                   Idle Time All line ({dailyRecord.date})
                 </span>
-                <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Achieved
-                </span>
+                {dailyRecord.idleTimePct <= RF_TARGETS.idleTimePct ? (
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Achieved
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-medium text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Below target
+                  </span>
+                )}
               </div>
               <div className="mt-3 flex items-baseline justify-between">
                 <div className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
@@ -360,8 +672,17 @@ export default function App() {
                     Target: ≤{RF_TARGETS.idleTimePct}%
                   </span>
                   <span className="mx-1.5 text-slate-300">·</span>
-                  <span className="font-bold text-emerald-700">
-                    Gap +
+                  <span
+                    className={`font-bold ${
+                      dailyRecord.idleTimePct <= RF_TARGETS.idleTimePct
+                        ? 'text-emerald-700'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    Gap{' '}
+                    {RF_TARGETS.idleTimePct - dailyRecord.idleTimePct >= 0
+                      ? '+'
+                      : ''}
                     {(RF_TARGETS.idleTimePct - dailyRecord.idleTimePct).toFixed(
                       2
                     )}
@@ -380,7 +701,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* Section 1: RF PERFORMANCE SUMMARY TABLE (Exact faithful web version of image.png) */}
+        {/* Section 1: RF PERFORMANCE SUMMARY TABLE (With Inline Auto-Save Editing) */}
         <section id="summary-table" className="scroll-mt-20">
           <PerformanceSummaryTable
             rows={rows}
@@ -389,6 +710,12 @@ export default function App() {
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
             selectedDate={dailyRecord.date}
+            dailyRecord={dailyRecord}
+            onInlineUpdateDaily={(field, value) =>
+              handleUpdateRecordField(dailyRecord.date, field, value)
+            }
+            inlineEditEnabled={inlineEditEnabled}
+            onToggleInlineEdit={() => setInlineEditEnabled((prev) => !prev)}
           />
         </section>
 
@@ -403,16 +730,19 @@ export default function App() {
           />
         </section>
 
-        {/* Section 3: DAILY HISTORICAL LOG TABLE (01/10/2026 - 10/10/2026) */}
+        {/* Section 3: DAILY HISTORICAL LOG TABLE (With Live Auto-Save Cell Editing) */}
         <section id="daily-log" className="scroll-mt-20 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
               <p className="text-xs font-medium text-blue-700">
-                Daily Operations Log · ประวัติข้อมูลรายวัน (Oct&apos;2026)
+                Daily Operations Log · ประวัติข้อมูลรายวันพร้อมบันทึกอัตโนมัติ (Oct&apos;2026)
               </p>
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">
                 ตารางบันทึกผลการใช้งานรายวัน (01/10/2026 – {records[records.length - 1]?.date})
               </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                แก้ไขตัวเลขในแต่ละแถวได้โดยตรง ระบบจะบันทึกอัตโนมัติ (Auto-Save) และคำนวณกราฟพร้อมค่าเฉลี่ย MTD ทันที
+              </p>
             </div>
             <button
               type="button"
@@ -420,7 +750,7 @@ export default function App() {
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              เพิ่ม/แก้ไขข้อมูลรายวัน
+              เพิ่มวันใหม่ (Add Daily Row)
             </button>
           </div>
 
@@ -469,18 +799,60 @@ export default function App() {
                             </span>
                           )}
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono tabular-nums">
-                          <span className="font-semibold text-slate-900">
-                            {rec.uphA}
-                          </span>{' '}
+                        <td
+                          className="py-2 px-4 text-right font-mono tabular-nums"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <input
+                              type="number"
+                              min={0}
+                              max={500}
+                              value={rec.uphA}
+                              onChange={(e) => {
+                                setSelectedDate(rec.date);
+                                handleUpdateRecordField(
+                                  rec.date,
+                                  'uphA',
+                                  Math.max(0, Number(e.target.value) || 0)
+                                );
+                              }}
+                              className="w-16 px-1.5 py-1 text-right font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-900">
+                              {rec.uphA}
+                            </span>
+                          )}{' '}
                           <span className="text-red-600 text-xs">
                             ({rec.uphA - RF_TARGETS.uphA})
                           </span>
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono tabular-nums">
-                          <span className="font-semibold text-slate-900">
-                            {rec.uphB}
-                          </span>{' '}
+                        <td
+                          className="py-2 px-4 text-right font-mono tabular-nums"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <input
+                              type="number"
+                              min={0}
+                              max={500}
+                              value={rec.uphB}
+                              onChange={(e) => {
+                                setSelectedDate(rec.date);
+                                handleUpdateRecordField(
+                                  rec.date,
+                                  'uphB',
+                                  Math.max(0, Number(e.target.value) || 0)
+                                );
+                              }}
+                              className="w-16 px-1.5 py-1 text-right font-mono font-semibold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-900">
+                              {rec.uphB}
+                            </span>
+                          )}{' '}
                           <span className="text-red-600 text-xs">
                             ({rec.uphB - RF_TARGETS.uphB})
                           </span>
@@ -493,14 +865,82 @@ export default function App() {
                             ({rec.uphAll - RF_TARGETS.uphAll})
                           </span>
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono tabular-nums text-emerald-700 font-semibold">
-                          {rec.upphAll.toFixed(2)}
+                        <td
+                          className="py-2 px-4 text-right font-mono tabular-nums text-emerald-700 font-semibold"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              max={5}
+                              value={rec.upphAll}
+                              onChange={(e) => {
+                                setSelectedDate(rec.date);
+                                handleUpdateRecordField(
+                                  rec.date,
+                                  'upphAll',
+                                  Math.max(0, Number(e.target.value) || 0)
+                                );
+                              }}
+                              className="w-16 px-1.5 py-1 text-right font-mono font-semibold text-emerald-800 bg-white border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+                            />
+                          ) : (
+                            rec.upphAll.toFixed(2)
+                          )}
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono tabular-nums text-emerald-700 font-semibold">
-                          {rec.idleTimePct.toFixed(1)}%
+                        <td
+                          className="py-2 px-4 text-right font-mono tabular-nums text-emerald-700 font-semibold"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <div className="inline-flex items-center justify-end gap-0.5">
+                              <input
+                                type="number"
+                                step="0.1"
+                                min={0}
+                                max={100}
+                                value={rec.idleTimePct}
+                                onChange={(e) => {
+                                  setSelectedDate(rec.date);
+                                  handleUpdateRecordField(
+                                    rec.date,
+                                    'idleTimePct',
+                                    Math.max(
+                                      0,
+                                      Math.min(100, Number(e.target.value) || 0)
+                                    )
+                                  );
+                                }}
+                                className="w-14 px-1.5 py-1 text-right font-mono font-semibold text-emerald-800 bg-white border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+                              />
+                              <span>%</span>
+                            </div>
+                          ) : (
+                            `${rec.idleTimePct.toFixed(1)}%`
+                          )}
                         </td>
-                        <td className="py-2.5 px-4 text-slate-600 text-xs">
-                          {rec.shiftNote}
+                        <td
+                          className="py-2 px-4 text-slate-600 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <input
+                              type="text"
+                              value={rec.shiftNote}
+                              onChange={(e) =>
+                                handleUpdateRecordField(
+                                  rec.date,
+                                  'shiftNote',
+                                  e.target.value
+                                )
+                              }
+                              className="w-full min-w-[200px] px-2 py-1 text-xs text-slate-700 bg-white border border-slate-200 rounded focus:outline-none focus:border-blue-600"
+                            />
+                          ) : (
+                            rec.shiftNote
+                          )}
                         </td>
                       </tr>
                     );
@@ -554,7 +994,10 @@ export default function App() {
       {/* Quiet Footer */}
       <footer className="border-t border-slate-200 bg-white px-6 py-4 mt-12">
         <div className="max-w-[1360px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <span>RF Performance Summary &amp; Daily Usage Analytics</span>
+          <span>
+            RF Performance Summary &amp; Daily Usage Analytics · Auto-Save{' '}
+            {autoSaveEnabled ? 'Active' : 'Paused'} (Saved {lastSavedAt})
+          </span>
           <div className="flex items-center gap-4">
             <button
               type="button"
@@ -586,7 +1029,7 @@ export default function App() {
                   บันทึกผลการใช้งานรายวัน (Log Daily RF Result)
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  เพิ่มข้อมูลวันใหม่หรืออัปเดตตัวเลขเพื่อคำนวณกราฟและค่าเฉลี่ย MTD อัตโนมัติ
+                  ข้อมูลที่เพิ่มจะถูกจัดเก็บในโหมดบันทึกอัตโนมัติบน Web ทันที
                 </p>
               </div>
               <button

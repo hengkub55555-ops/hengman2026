@@ -1,6 +1,6 @@
 import React from 'react';
-import { PerformanceRow } from '../data/rfPerformanceData';
-import { CheckCircle2, AlertTriangle } from 'lucide-react';
+import { PerformanceRow, DailyRFRecord } from '../data/rfPerformanceData';
+import { CheckCircle2, AlertTriangle, Edit3 } from 'lucide-react';
 
 interface PerformanceSummaryTableProps {
   rows: PerformanceRow[];
@@ -9,6 +9,13 @@ interface PerformanceSummaryTableProps {
   searchQuery: string;
   onSearchQueryChange: (q: string) => void;
   selectedDate: string;
+  dailyRecord: DailyRFRecord;
+  onInlineUpdateDaily: (
+    field: 'uphA' | 'uphB' | 'upphAll' | 'idleTimePct',
+    value: number
+  ) => void;
+  inlineEditEnabled: boolean;
+  onToggleInlineEdit: () => void;
 }
 
 export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = ({
@@ -18,6 +25,10 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
   searchQuery,
   onSearchQueryChange,
   selectedDate,
+  dailyRecord,
+  onInlineUpdateDaily,
+  inlineEditEnabled,
+  onToggleInlineEdit,
 }) => {
   const filteredRows = rows.filter((row) => {
     const matchesStatus =
@@ -33,10 +44,93 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
   const dailyRows = filteredRows.filter((r) => r.periodGroup === 'daily');
   const mtdRows = filteredRows.filter((r) => r.periodGroup === 'mtd');
 
+  const renderActualCell = (row: PerformanceRow) => {
+    if (!inlineEditEnabled || row.periodGroup !== 'daily') {
+      return <span>{row.actualDisplay}</span>;
+    }
+
+    if (row.id === 'daily-uph-a') {
+      return (
+        <input
+          type="number"
+          min={0}
+          max={500}
+          value={dailyRecord.uphA}
+          onChange={(e) =>
+            onInlineUpdateDaily('uphA', Math.max(0, Number(e.target.value) || 0))
+          }
+          aria-label="Actual UPH-A"
+          className="w-20 px-2 py-1 text-center font-mono font-bold text-blue-900 bg-blue-50 border border-blue-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
+        />
+      );
+    }
+
+    if (row.id === 'daily-uph-b') {
+      return (
+        <input
+          type="number"
+          min={0}
+          max={500}
+          value={dailyRecord.uphB}
+          onChange={(e) =>
+            onInlineUpdateDaily('uphB', Math.max(0, Number(e.target.value) || 0))
+          }
+          aria-label="Actual UPH-B"
+          className="w-20 px-2 py-1 text-center font-mono font-bold text-blue-900 bg-blue-50 border border-blue-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
+        />
+      );
+    }
+
+    if (row.id === 'daily-upph-all') {
+      return (
+        <input
+          type="number"
+          step="0.01"
+          min={0}
+          max={5}
+          value={dailyRecord.upphAll}
+          onChange={(e) =>
+            onInlineUpdateDaily(
+              'upphAll',
+              Math.max(0, Number(e.target.value) || 0)
+            )
+          }
+          aria-label="Actual UPPH All line"
+          className="w-20 px-2 py-1 text-center font-mono font-bold text-blue-900 bg-blue-50 border border-blue-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
+        />
+      );
+    }
+
+    if (row.id === 'daily-idle-all') {
+      return (
+        <div className="inline-flex items-center justify-center gap-0.5">
+          <input
+            type="number"
+            step="0.1"
+            min={0}
+            max={100}
+            value={dailyRecord.idleTimePct}
+            onChange={(e) =>
+              onInlineUpdateDaily(
+                'idleTimePct',
+                Math.max(0, Math.min(100, Number(e.target.value) || 0))
+              )
+            }
+            aria-label="Actual Idle Time All line"
+            className="w-16 px-1.5 py-1 text-center font-mono font-bold text-blue-900 bg-blue-50 border border-blue-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
+          />
+          <span className="font-mono text-xs text-slate-600">%</span>
+        </div>
+      );
+    }
+
+    return <span>{row.actualDisplay}</span>;
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       {/* Table Title Banner matching the executive dark-blue header in the user's screenshot */}
-      <div className="bg-[#08427a] px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-[#08427a] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg sm:text-xl font-bold tracking-wide text-white">
             RF PERFORMANCE SUMMARY
@@ -46,8 +140,23 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
           </p>
         </div>
 
-        {/* Filter Controls */}
+        {/* Filter & Inline Edit Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleInlineEdit}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              inlineEditEnabled
+                ? 'bg-emerald-500 text-white border-emerald-400'
+                : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+            }`}
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            {inlineEditEnabled
+              ? 'กำลังแก้ไขตัวเลขในตาราง (Auto-Save)'
+              : 'แก้ไขตัวเลขในตาราง'}
+          </button>
+
           <input
             type="text"
             value={searchQuery}
@@ -59,7 +168,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
             <button
               type="button"
               onClick={() => onStatusFilterChange('all')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'all'
                   ? 'bg-white text-slate-900'
                   : 'text-sky-100 hover:text-white'
@@ -70,7 +179,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
             <button
               type="button"
               onClick={() => onStatusFilterChange('Achieved')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'Achieved'
                   ? 'bg-white text-emerald-800'
                   : 'text-sky-100 hover:text-white'
@@ -81,7 +190,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
             <button
               type="button"
               onClick={() => onStatusFilterChange('Below target')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'Below target'
                   ? 'bg-white text-red-700'
                   : 'text-sky-100 hover:text-white'
@@ -105,7 +214,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
               <th className="py-3 px-4 border-r border-white/20 text-center w-28">
                 Target
               </th>
-              <th className="py-3 px-4 border-r border-white/20 text-center w-28">
+              <th className="py-3 px-4 border-r border-white/20 text-center w-32">
                 Actual
               </th>
               <th className="py-3 px-4 border-r border-white/20 text-center w-28">
@@ -157,7 +266,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                       {row.targetDisplay}
                     </td>
                     <td className="py-3 px-4 border-r border-slate-200 text-center font-mono font-medium text-slate-900 tabular-nums">
-                      {row.actualDisplay}
+                      {renderActualCell(row)}
                     </td>
                     <td
                       className={`py-3 px-4 border-r border-slate-200 text-center font-mono font-semibold tabular-nums ${
@@ -167,13 +276,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                       {row.gapDisplay}
                     </td>
                     <td className="py-3 px-5 text-center">
-                      <span
-                        className={`inline-flex items-center justify-center gap-1.5 font-bold text-xs sm:text-sm ${
-                          row.status === 'Achieved'
-                            ? 'text-slate-900'
-                            : 'text-slate-900'
-                        }`}
-                      >
+                      <span className="inline-flex items-center justify-center gap-1.5 font-bold text-xs sm:text-sm text-slate-900">
                         {row.status === 'Achieved' ? (
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                         ) : (
