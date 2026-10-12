@@ -1,0 +1,6 @@
+{
+  "name": "RF Performance & Daily Analytics",
+  "description": "Web dashboard and daily analytics platform for tracking RF line performance (UPH-A, UPH-B, UPPH, Idle Time) against daily and month-to-date targets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
