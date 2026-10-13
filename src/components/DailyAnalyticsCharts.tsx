@@ -5,16 +5,20 @@ import {
   RF_TARGETS,
 } from '../data/rfPerformanceData';
 import {
+  Language,
+  TRANSLATIONS,
+  getLocalizedShiftNote,
+} from '../i18n/translations';
+import {
   BarChart3,
   TrendingUp,
   SlidersHorizontal,
-  CheckCircle2,
-  AlertTriangle,
   ArrowUpRight,
   ArrowDownRight,
 } from 'lucide-react';
 
 interface DailyAnalyticsChartsProps {
+  lang: Language;
   records: DailyRFRecord[];
   selectedDate: string;
   onSelectDate: (date: string) => void;
@@ -33,12 +37,14 @@ type ChartViewMode = 'grouped-bar' | 'trend-line';
 type LineFocus = 'all' | 'uphA' | 'uphB' | 'uphAll';
 
 export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
+  lang,
   records,
   selectedDate,
   onSelectDate,
   summaryRows,
   mtdAverages,
 }) => {
+  const t = TRANSLATIONS[lang];
   const [chartMode, setChartMode] = useState<ChartViewMode>('grouped-bar');
   const [lineFocus, setLineFocus] = useState<LineFocus>('all');
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -71,7 +77,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
       ? plotWidth / sortedRecords.length
       : plotWidth;
 
-  // Build polyline points for trend-line mode
   const buildPolyline = (getter: (r: DailyRFRecord) => number) =>
     sortedRecords
       .map((r, idx) => {
@@ -113,14 +118,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
     })
     .join(' ');
 
-  const idleLinePoints = sortedRecords
-    .map((r, idx) => {
-      const x = effPadLeft + idx * effXStep + effXStep / 2;
-      const y = idleToY(r.idleTimePct);
-      return `${x},${y}`;
-    })
-    .join(' ');
-
   const hoveredRecord =
     hoveredIndex !== null && sortedRecords[hoveredIndex]
       ? sortedRecords[hoveredIndex]
@@ -136,13 +133,13 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <p className="text-xs font-medium text-blue-700 tracking-wide">
-            Daily Performance Analytics · บทวิเคราะห์และกราฟสรุปผลรายวัน
+            {t.analyticsKicker}
           </p>
           <h2 className="text-2xl font-bold text-slate-900 mt-1">
-            แนวโน้มผลผลิต (UPH) และประสิทธิภาพการทำงานรายวัน
+            {t.analyticsTitle}
           </h2>
           <p className="text-sm text-slate-600 mt-1">
-            คลิกที่แท่งกราฟหรือจุดข้อมูลในแต่ละวันเพื่อสลับดูผลลัพธ์รายวัน ({activeRecord.date}) เทียบกับค่าเฉลี่ยสะสมทั้งเดือน (Oct&apos;2026 MTD)
+            {t.analyticsSubtitle(activeRecord.date)}
           </p>
         </div>
 
@@ -153,18 +150,18 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <button
               type="button"
               onClick={() => setLineFocus('all')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 lineFocus === 'all'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              ทุกสายการผลิต
+              {t.filterAllLines}
             </button>
             <button
               type="button"
               onClick={() => setLineFocus('uphA')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 lineFocus === 'uphA'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -175,7 +172,7 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <button
               type="button"
               onClick={() => setLineFocus('uphB')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 lineFocus === 'uphB'
                   ? 'bg-white text-amber-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -186,7 +183,7 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <button
               type="button"
               onClick={() => setLineFocus('uphAll')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 lineFocus === 'uphAll'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -201,26 +198,26 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <button
               type="button"
               onClick={() => setChartMode('grouped-bar')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 chartMode === 'grouped-bar'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <BarChart3 className="w-3.5 h-3.5" />
-              กราฟแท่งเปรียบเทียบ
+              {t.chartGroupedBar}
             </button>
             <button
               type="button"
               onClick={() => setChartMode('trend-line')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 chartMode === 'trend-line'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <TrendingUp className="w-3.5 h-3.5" />
-              กราฟเส้นแนวโน้ม
+              {t.chartTrendLine}
             </button>
           </div>
         </div>
@@ -231,11 +228,9 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div>
             <h3 className="text-base font-bold text-slate-900">
-              01. กราฟสรุปผลผลิตต่อชั่วโมงรายวัน (Daily UPH: Line A vs Line B vs All Line)
+              {t.chart1Title}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              เปรียบเทียบยอดผลิตจริงรายวันกับเส้นเป้าหมาย (Target UPH-A: 172 · Target All Line: 144 · Target UPH-B: 115)
-            </p>
+            <p className="text-xs text-slate-500 mt-0.5">{t.chart1Subtitle}</p>
           </div>
 
           {/* Legend */}
@@ -243,19 +238,19 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             {(lineFocus === 'all' || lineFocus === 'uphA') && (
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-xs bg-blue-600 inline-block" />
-                <span>UPH-A (เป้า 172)</span>
+                <span>{t.legendUphA}</span>
               </div>
             )}
             {(lineFocus === 'all' || lineFocus === 'uphAll') && (
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-xs bg-slate-700 inline-block" />
-                <span>UPH All line (เป้า 144)</span>
+                <span>{t.legendUphAll}</span>
               </div>
             )}
             {(lineFocus === 'all' || lineFocus === 'uphB') && (
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-xs bg-amber-500 inline-block" />
-                <span>UPH-B (เป้า 115)</span>
+                <span>{t.legendUphB}</span>
               </div>
             )}
           </div>
@@ -267,7 +262,7 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="w-full h-auto min-w-[680px] select-none"
             role="img"
-            aria-label="กราฟสรุปผลการใช้งานรายวัน UPH-A, UPH-B และ UPH All line"
+            aria-label={t.chart1Title}
           >
             {/* Horizontal grid lines */}
             {[0, 40, 80, 120, 160, 200].map((tick) => {
@@ -369,7 +364,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                 const isSelected = rec.date === activeRecord.date;
                 const isHovered = hoveredIndex === idx;
 
-                // Determine active series
                 const series: {
                   key: string;
                   val: number;
@@ -404,7 +398,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                     onMouseLeave={() => setHoveredIndex(null)}
                     onClick={() => onSelectDate(rec.date)}
                   >
-                    {/* Active / Hover Column Highlight */}
                     <rect
                       x={padLeft + idx * xStep + 4}
                       y={padTop}
@@ -451,7 +444,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                       );
                     })}
 
-                    {/* X-axis label */}
                     <text
                       x={groupCenterX}
                       y={svgHeight - 14}
@@ -594,21 +586,32 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
         {/* Selected / Hovered Day Inspector Strip */}
         <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-4 items-center text-xs">
           <div className="md:col-span-2">
-            <span className="text-slate-500">วันที่เลือกดูข้อมูล (Selected Day):</span>
+            <span className="text-slate-500">{t.selectedDayLabel}</span>
             <div className="font-mono font-bold text-slate-900 text-sm mt-0.5">
-              {hoveredRecord.date} · <span className="font-sans font-normal text-slate-600">{hoveredRecord.shiftNote}</span>
+              {hoveredRecord.date} ·{' '}
+              <span className="font-sans font-normal text-slate-600">
+                {getLocalizedShiftNote(
+                  hoveredRecord.id,
+                  hoveredRecord.shiftNote,
+                  lang
+                )}
+              </span>
             </div>
           </div>
           <div className="flex items-center justify-between md:justify-start gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
             <span className="text-slate-600">UPH-A:</span>
-            <span className="font-mono font-bold text-slate-900">{hoveredRecord.uphA}</span>
+            <span className="font-mono font-bold text-slate-900">
+              {hoveredRecord.uphA}
+            </span>
             <span className="font-mono text-red-600">
               ({hoveredRecord.uphA - RF_TARGETS.uphA})
             </span>
           </div>
           <div className="flex items-center justify-between md:justify-start gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
             <span className="text-slate-600">UPH-B:</span>
-            <span className="font-mono font-bold text-slate-900">{hoveredRecord.uphB}</span>
+            <span className="font-mono font-bold text-slate-900">
+              {hoveredRecord.uphB}
+            </span>
             <span className="font-mono text-red-600">
               ({hoveredRecord.uphB - RF_TARGETS.uphB})
             </span>
@@ -616,7 +619,8 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
           <div className="flex items-center justify-between md:justify-start gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
             <span className="text-slate-600">UPPH / Idle:</span>
             <span className="font-mono font-bold text-emerald-700">
-              {hoveredRecord.upphAll.toFixed(2)} · {hoveredRecord.idleTimePct.toFixed(1)}%
+              {hoveredRecord.upphAll.toFixed(2)} ·{' '}
+              {hoveredRecord.idleTimePct.toFixed(1)}%
             </span>
           </div>
         </div>
@@ -630,20 +634,20 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  02. กราฟประสิทธิภาพรายบุคคล (UPPH) และอัตราเวลาว่าง (Idle Time %)
+                  {t.chart2Title}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  ค่า UPPH สูงกว่าเป้า 0.21 ทุกวัน และ Idle Time ลดลงต่ำสุดที่ 1.6% ในวันที่ 10/10/2026 (เกณฑ์ ≤5%)
+                  {t.chart2Subtitle}
                 </p>
               </div>
               <div className="flex items-center gap-4 text-xs shrink-0">
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-xs bg-emerald-600 inline-block" />
-                  <span className="text-slate-700">UPPH (เป้า ≥0.21)</span>
+                  <span className="text-slate-700">{t.legendUpph}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-xs bg-sky-500 inline-block" />
-                  <span className="text-slate-700">Idle Time % (เป้า ≤5%)</span>
+                  <span className="text-slate-700">{t.legendIdle}</span>
                 </div>
               </div>
             </div>
@@ -653,9 +657,8 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                 viewBox={`0 0 ${effWidth} ${effHeight}`}
                 className="w-full h-auto min-w-[560px] select-none"
                 role="img"
-                aria-label="กราฟ UPPH และ Idle Time รายวัน"
+                aria-label={t.chart2Title}
               >
-                {/* Grid lines */}
                 {[0, 0.08, 0.16, 0.24, 0.32].map((uTick, i) => {
                   const y = upphToY(uTick);
                   const idleEquivalent = (i * 1.5).toFixed(1);
@@ -816,10 +819,20 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
           {/* Summary Insight Footer inside Chart 2 */}
           <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
             <span>
-              ค่าเฉลี่ยสะสม (MTD UPPH): <strong className="font-mono text-emerald-700">{mtdAverages.upphAll.toFixed(2)}</strong> (+0.03 เหนือเป้าหมาย)
+              {t.mtdUpphSummary}{' '}
+              <strong className="font-mono text-emerald-700">
+                {mtdAverages.upphAll.toFixed(2)}
+              </strong>{' '}
+              (+{(mtdAverages.upphAll - RF_TARGETS.upphAll).toFixed(2)}{' '}
+              {t.aboveTargetSuffix})
             </span>
             <span>
-              ค่าเฉลี่ยเวลาว่างสะสม (MTD Idle): <strong className="font-mono text-emerald-700">{mtdAverages.idleTimePct.toFixed(2)}%</strong> (ดีกว่าเกณฑ์ +2.30%)
+              {t.mtdIdleSummary}{' '}
+              <strong className="font-mono text-emerald-700">
+                {mtdAverages.idleTimePct.toFixed(2)}%
+              </strong>{' '}
+              (+{(RF_TARGETS.idleTimePct - mtdAverages.idleTimePct).toFixed(2)}%{' '}
+              {t.betterThanCeilingSuffix})
             </span>
           </div>
         </div>
@@ -830,10 +843,10 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             <div className="flex items-center justify-between gap-2 pb-4 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  03. วิเคราะห์ส่วนต่างเป้าหมาย (Target vs Actual Gap)
+                  {t.chart3Title}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  เปรียบเทียบอัตราการบรรลุเป้าหมายรายตัวชี้วัด
+                  {t.chart3Subtitle}
                 </p>
               </div>
 
@@ -841,24 +854,24 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                 <button
                   type="button"
                   onClick={() => setVariancePeriod('daily')}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     variancePeriod === 'daily'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  รายวัน ({activeRecord.shortDate})
+                  {t.periodDailyBtn(activeRecord.shortDate)}
                 </button>
                 <button
                   type="button"
                   onClick={() => setVariancePeriod('mtd')}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     variancePeriod === 'mtd'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  สะสม (Oct&apos;2026)
+                  {t.periodMtdBtn}
                 </button>
               </div>
             </div>
@@ -866,7 +879,6 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
             {/* Horizontal Progress / Variance Bars */}
             <div className="mt-4 space-y-4">
               {filteredVarianceRows.map((row) => {
-                // Compute achievement % for bar visualization
                 const isIdleMetric = row.topic.includes('Idle Time');
                 const achievementPct = isIdleMetric
                   ? Math.min(
@@ -891,10 +903,16 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
                       </span>
                       <div className="flex items-center gap-3 font-mono">
                         <span className="text-slate-500">
-                          เป้า: <strong className="text-slate-700">{row.targetDisplay}</strong>
+                          {t.targetLabel}:{' '}
+                          <strong className="text-slate-700">
+                            {row.targetDisplay}
+                          </strong>
                         </span>
                         <span className="text-slate-500">
-                          จริง: <strong className="text-slate-900">{row.actualDisplay}</strong>
+                          {t.actualLabel}:{' '}
+                          <strong className="text-slate-900">
+                            {row.actualDisplay}
+                          </strong>
                         </span>
                         <span
                           className={`font-bold inline-flex items-center gap-0.5 ${
@@ -933,18 +951,25 @@ export const DailyAnalyticsCharts: React.FC<DailyAnalyticsChartsProps> = ({
           <div className="mt-6 pt-4 border-t border-slate-200 space-y-2.5 text-xs">
             <div className="font-bold text-slate-900 flex items-center gap-1.5">
               <SlidersHorizontal className="w-4 h-4 text-blue-700" />
-              <span>สรุปการวิเคราะห์เชิงลึก (Operational Diagnostic)</span>
+              <span>{t.diagnosticTitle}</span>
             </div>
             <p className="text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">1. ประสิทธิภาพรายบุคคลบรรลุเป้า (Achieved):</strong>{' '}
-              ค่า <span className="font-mono font-semibold text-emerald-700">UPPH All line</span> ทำได้{' '}
-              <span className="font-mono font-semibold">{activeRecord.upphAll.toFixed(2)}</span> (สูงกว่าเป้า 0.21 อยู่ +0.04) และ{' '}
-              <span className="font-mono font-semibold text-emerald-700">Idle Time</span> ต่ำเพียง{' '}
-              <span className="font-mono font-semibold">{activeRecord.idleTimePct.toFixed(1)}%</span> (ต่ำกว่าเพดาน ≤5% ถึง +3.40%) สะท้อนว่าพนักงานหน้างานทำงานเต็มประสิทธิภาพและแทบไม่มีการสูญเสียเวลารอคอย
+              <strong className="text-slate-900">
+                {t.diagnosticPoint1Title}
+              </strong>{' '}
+              {t.diagnosticPoint1Body(
+                activeRecord.upphAll.toFixed(2),
+                activeRecord.idleTimePct.toFixed(1)
+              )}
             </p>
             <p className="text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">2. สาเหตุที่ UPH-A และ UPH-B ต่ำกว่าเป้า (Below target):</strong>{' '}
-              เนื่องจาก UPPH ต่อคนสูงกว่าเกณฑ์แล้ว ช่องว่างของยอดผลิตรวมรายชั่วโมง (<span className="font-mono text-red-600">UPH-A {activeRecord.uphA - RF_TARGETS.uphA}</span>, <span className="font-mono text-red-600">UPH-B {activeRecord.uphB - RF_TARGETS.uphB}</span>) จึงเกิดจากจำนวนสถานี/กำลังคนที่เข้าประจำสายการผลิตน้อยกว่าแผน ไม่ใช่ปัญหาด้านความเร็วของพนักงาน
+              <strong className="text-slate-900">
+                {t.diagnosticPoint2Title}
+              </strong>{' '}
+              {t.diagnosticPoint2Body(
+                activeRecord.uphA - RF_TARGETS.uphA,
+                activeRecord.uphB - RF_TARGETS.uphB
+              )}
             </p>
           </div>
         </div>

@@ -4,9 +4,18 @@ import {
   DailyRFRecord,
   RF_TARGETS,
   computeSummaryRows,
+  UpdateHistoryEntry,
 } from './data/rfPerformanceData';
+import {
+  Language,
+  TRANSLATIONS,
+  getLocalizedShiftNote,
+} from './i18n/translations';
 import { PerformanceSummaryTable } from './components/PerformanceSummaryTable';
 import { DailyAnalyticsCharts } from './components/DailyAnalyticsCharts';
+import { UpdateHistoryModal } from './components/UpdateHistoryModal';
+import { DashboardSummaryView } from './components/DashboardSummaryView';
+import { RootCauseAnalysisView } from './components/RootCauseAnalysisView';
 import {
   Calendar,
   Download,
@@ -19,25 +28,40 @@ import {
   Check,
   Clock,
   Edit3,
+  Globe,
+  History,
+  Layers,
+  LayoutDashboard,
+  Table as TableIcon,
+  BarChart3,
+  GitBranch,
+  FileSpreadsheet,
 } from 'lucide-react';
 
-const STORAGE_KEY = 'rf_performance_web_autosave_v1';
+const STORAGE_KEY = 'rf_performance_web_autosave_v2';
 
 interface PersistedWebState {
   records: DailyRFRecord[];
   selectedDate: string;
+  monthLabel: string;
   autoSaveEnabled: boolean;
   inlineEditEnabled: boolean;
+  lang?: Language;
   lastSavedAt: string;
   saveCount: number;
+  history: UpdateHistoryEntry[];
 }
 
-function formatThaiTime(date: Date): string {
+function formatTime(date: Date): string {
   return date.toLocaleTimeString('th-TH', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+function formatFullDateTime(date: Date): string {
+  return `${date.toLocaleDateString('th-TH')} ${date.toLocaleTimeString('th-TH')}`;
 }
 
 export default function App() {
@@ -56,12 +80,22 @@ export default function App() {
     }
   }, []);
 
+  const [lang, setLang] = useState<Language>(
+    () => initialLoaded?.lang || 'th'
+  );
   const [records, setRecords] = useState<DailyRFRecord[]>(
     () => initialLoaded?.records || INITIAL_DAILY_RECORDS
   );
   const [selectedDate, setSelectedDate] = useState<string>(
     () => initialLoaded?.selectedDate || '10/10/2026'
   );
+  const [monthLabel, setMonthLabel] = useState<string>(
+    () => initialLoaded?.monthLabel || "Oct'2026"
+  );
+  const [history, setHistory] = useState<UpdateHistoryEntry[]>(
+    () => initialLoaded?.history || []
+  );
+
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(
     () => initialLoaded?.autoSaveEnabled ?? true
   );
@@ -72,7 +106,7 @@ export default function App() {
     'saved'
   );
   const [lastSavedAt, setLastSavedAt] = useState<string>(
-    () => initialLoaded?.lastSavedAt || formatThaiTime(new Date())
+    () => initialLoaded?.lastSavedAt || formatTime(new Date())
   );
   const [saveCount, setSaveCount] = useState<number>(
     () => initialLoaded?.saveCount || 1
@@ -81,8 +115,12 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<
     'all' | 'Achieved' | 'Below target'
   >('all');
+  const [activeView, setActiveView] = useState<
+    'dashboard' | 'summary' | 'analytics' | 'rca' | 'dailylog' | 'all'
+  >('dashboard');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLogModalOpen, setIsLogModalOpen] = useState<boolean>(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
 
   // New/Edit Record Form State
   const [formIsoDate, setFormIsoDate] = useState<string>('2026-10-11');
@@ -94,23 +132,55 @@ export default function App() {
     'เพิ่มกำลังคนเสริมสถานี RF-A และปรับสมดุล Line B'
   );
 
+  const t = TRANSLATIONS[lang];
   const isFirstMount = useRef(true);
+
+  // Helper to record history entry
+  const recordHistoryEntry = (
+    targetDate: string,
+    actionType: UpdateHistoryEntry['actionType'],
+    field: string,
+    oldValue: string,
+    newValue: string,
+    note?: string
+  ) => {
+    if (oldValue === newValue) return;
+    const now = new Date();
+    const newEntry: UpdateHistoryEntry = {
+      id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: formatFullDateTime(now),
+      isoTimestamp: now.toISOString(),
+      targetDate,
+      actionType,
+      field,
+      oldValue,
+      newValue,
+      note,
+    };
+    setHistory((prev) => [newEntry, ...prev]);
+  };
 
   // Persist helper
   const persistToWebStorage = (
     nextRecords: DailyRFRecord[],
     nextSelectedDate: string,
+    nextMonthLabel: string,
+    nextHistory: UpdateHistoryEntry[],
     nextAutoSave: boolean,
-    nextInlineEdit: boolean
+    nextInlineEdit: boolean,
+    nextLang: Language
   ) => {
     try {
-      const nowStr = formatThaiTime(new Date());
+      const nowStr = formatTime(new Date());
       const nextCount = saveCount + 1;
       const payload: PersistedWebState = {
         records: nextRecords,
         selectedDate: nextSelectedDate,
+        monthLabel: nextMonthLabel,
+        history: nextHistory,
         autoSaveEnabled: nextAutoSave,
         inlineEditEnabled: nextInlineEdit,
+        lang: nextLang,
         lastSavedAt: nowStr,
         saveCount: nextCount,
       };
@@ -123,7 +193,7 @@ export default function App() {
     }
   };
 
-  // Auto-Save Effect whenever records, selectedDate, or inlineEditEnabled change
+  // Auto-Save Effect whenever records, selectedDate, monthLabel, history, inlineEditEnabled, or lang change
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
@@ -140,21 +210,35 @@ export default function App() {
       persistToWebStorage(
         records,
         selectedDate,
+        monthLabel,
+        history,
         autoSaveEnabled,
-        inlineEditEnabled
+        inlineEditEnabled,
+        lang
       );
     }, 220);
 
     return () => window.clearTimeout(timer);
-  }, [records, selectedDate, autoSaveEnabled, inlineEditEnabled]);
+  }, [
+    records,
+    selectedDate,
+    monthLabel,
+    history,
+    autoSaveEnabled,
+    inlineEditEnabled,
+    lang,
+  ]);
 
   const handleManualSaveNow = () => {
     setSaveStatus('saving');
     persistToWebStorage(
       records,
       selectedDate,
+      monthLabel,
+      history,
       autoSaveEnabled,
-      inlineEditEnabled
+      inlineEditEnabled,
+      lang
     );
   };
 
@@ -162,7 +246,15 @@ export default function App() {
     const nextState = !autoSaveEnabled;
     setAutoSaveEnabled(nextState);
     if (nextState) {
-      persistToWebStorage(records, selectedDate, true, inlineEditEnabled);
+      persistToWebStorage(
+        records,
+        selectedDate,
+        monthLabel,
+        history,
+        true,
+        inlineEditEnabled,
+        lang
+      );
     } else {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -178,16 +270,84 @@ export default function App() {
   };
 
   const { dailyRecord, mtdAverages, rows } = useMemo(
-    () => computeSummaryRows(records, selectedDate),
-    [records, selectedDate]
+    () => computeSummaryRows(records, selectedDate, monthLabel),
+    [records, selectedDate, monthLabel]
   );
+
+  const availableDates = useMemo(
+    () => records.map((r) => r.date),
+    [records]
+  );
+
+  // In-table Date update handler
+  const handleUpdateDate = (oldDate: string, newDate: string) => {
+    if (!newDate || oldDate === newDate) return;
+
+    // Check if newDate already exists in records
+    const existingRec = records.find((r) => r.date === newDate);
+    if (existingRec) {
+      setSelectedDate(newDate);
+      recordHistoryEntry(
+        oldDate,
+        'date_change',
+        'สลับวันที่ดูผลลัพธ์ (Active Date)',
+        oldDate,
+        newDate,
+        'สลับวันแสดงผลในตาราง'
+      );
+      return;
+    }
+
+    // Rename date on current record
+    setRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.date === oldDate) {
+          return {
+            ...rec,
+            date: newDate,
+            shortDate: newDate.slice(0, 5),
+          };
+        }
+        return rec;
+      })
+    );
+    setSelectedDate(newDate);
+    recordHistoryEntry(
+      oldDate,
+      'date_change',
+      'แก้ไขวันที่ในตาราง (Date)',
+      oldDate,
+      newDate,
+      'แก้ไขวันที่โดยตรงในตาราง'
+    );
+  };
+
+  // In-table Month update handler
+  const handleUpdateMonth = (oldMonth: string, newMonth: string) => {
+    if (!newMonth || oldMonth === newMonth) return;
+    setMonthLabel(newMonth);
+    recordHistoryEntry(
+      selectedDate,
+      'month_change',
+      'แก้ไขรอบเดือน (Month MTD)',
+      oldMonth,
+      newMonth,
+      'แก้ไขรอบเดือนโดยตรงในตาราง'
+    );
+  };
 
   // Inline update handler for any field of a specific date record
   const handleUpdateRecordField = (
     targetDate: string,
-    field: 'uphA' | 'uphB' | 'upphAll' | 'idleTimePct' | 'shiftNote',
+    field: 'uphA' | 'uphB' | 'upphAll' | 'idleTimePct' | 'shiftNote' | 'date',
     value: number | string
   ) => {
+    const currentRec = records.find((r) => r.date === targetDate);
+    if (!currentRec) return;
+
+    const oldValue = String(currentRec[field as keyof DailyRFRecord] ?? '');
+    const newValue = String(value);
+
     setRecords((prev) =>
       prev.map((rec) => {
         if (rec.date !== targetDate) return rec;
@@ -195,9 +355,117 @@ export default function App() {
         if (field === 'uphA' || field === 'uphB') {
           updated.uphAll = Math.round((updated.uphA + updated.uphB) / 2);
         }
+        if (field === 'date' && typeof value === 'string') {
+          updated.date = value;
+          updated.shortDate = value.slice(0, 5);
+        }
         return updated;
       })
     );
+
+    if (field === 'date') {
+      setSelectedDate(String(value));
+      recordHistoryEntry(
+        targetDate,
+        'date_change',
+        'แก้ไขวันที่ในแถวบันทึก',
+        oldValue,
+        newValue,
+        'แก้ไขวันที่ในตารางประวัติ'
+      );
+    } else {
+      recordHistoryEntry(
+        targetDate,
+        'metric_update',
+        field === 'uphA'
+          ? 'UPH-A'
+          : field === 'uphB'
+          ? 'UPH-B'
+          : field === 'upphAll'
+          ? 'UPPH All line'
+          : field === 'idleTimePct'
+          ? 'Idle Time %'
+          : 'หมายเหตุกะ (Shift Note)',
+        oldValue,
+        newValue,
+        'แก้ไขตัวเลขในตารางแบบ Auto-Save'
+      );
+    }
+  };
+
+  // Revert a historical update
+  const handleRevertHistoryEntry = (entry: UpdateHistoryEntry) => {
+    if (entry.actionType === 'date_change') {
+      // Revert date
+      setRecords((prev) =>
+        prev.map((rec) => {
+          if (rec.date === entry.newValue) {
+            return {
+              ...rec,
+              date: entry.oldValue,
+              shortDate: entry.oldValue.slice(0, 5),
+            };
+          }
+          return rec;
+        })
+      );
+      setSelectedDate(entry.oldValue);
+      recordHistoryEntry(
+        entry.newValue,
+        'revert',
+        `คืนค่า ${entry.field}`,
+        entry.newValue,
+        entry.oldValue,
+        'คืนค่าย้อนหลังจากประวัติ'
+      );
+    } else if (entry.actionType === 'month_change') {
+      // Revert month
+      setMonthLabel(entry.oldValue);
+      recordHistoryEntry(
+        entry.targetDate,
+        'revert',
+        `คืนค่ารอบเดือน (Month MTD)`,
+        entry.newValue,
+        entry.oldValue,
+        'คืนค่ารอบเดือนย้อนหลังจากประวัติ'
+      );
+    } else if (entry.actionType === 'metric_update') {
+      // Revert metric
+      setRecords((prev) =>
+        prev.map((rec) => {
+          if (rec.date !== entry.targetDate) return rec;
+          const updated = { ...rec };
+          if (entry.field === 'UPH-A') {
+            updated.uphA = Number(entry.oldValue) || 0;
+            updated.uphAll = Math.round((updated.uphA + updated.uphB) / 2);
+          } else if (entry.field === 'UPH-B') {
+            updated.uphB = Number(entry.oldValue) || 0;
+            updated.uphAll = Math.round((updated.uphA + updated.uphB) / 2);
+          } else if (entry.field === 'UPPH All line') {
+            updated.upphAll = Number(entry.oldValue) || 0;
+          } else if (entry.field === 'Idle Time %') {
+            updated.idleTimePct = Number(entry.oldValue) || 0;
+          } else if (entry.field === 'หมายเหตุกะ (Shift Note)') {
+            updated.shiftNote = entry.oldValue;
+          }
+          return updated;
+        })
+      );
+      recordHistoryEntry(
+        entry.targetDate,
+        'revert',
+        `คืนค่า ${entry.field}`,
+        entry.newValue,
+        entry.oldValue,
+        'คืนค่าย้อนหลังจากประวัติ'
+      );
+    }
+  };
+
+  const handleClearHistory = () => {
+    if (window.confirm('คุณต้องการล้างประวัติการอัปเดตย้อนหลังทั้งหมดหรือไม่?')) {
+      setHistory([]);
+    }
   };
 
   const handleExportCSV = () => {
@@ -229,6 +497,8 @@ export default function App() {
   const handleResetData = () => {
     setRecords(INITIAL_DAILY_RECORDS);
     setSelectedDate('10/10/2026');
+    setMonthLabel("Oct'2026");
+    setHistory([]);
     setStatusFilter('all');
     setSearchQuery('');
     try {
@@ -236,7 +506,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    setLastSavedAt(formatThaiTime(new Date()));
+    setLastSavedAt(formatTime(new Date()));
     setSaveStatus('saved');
   };
 
@@ -281,7 +551,7 @@ export default function App() {
       idleTimePct,
       activeOperatorsA: 28,
       activeOperatorsB: 20,
-      shiftNote: formNote.trim() || 'บันทึกผลการปฏิบัติงานรายวัน',
+      shiftNote: formNote.trim() || 'Daily RF Operation Log',
     };
 
     setRecords((prev) => {
@@ -293,6 +563,16 @@ export default function App() {
         a.isoDate.localeCompare(b.isoDate)
       );
     });
+
+    recordHistoryEntry(
+      formattedDate,
+      'record_add',
+      'เพิ่ม/อัปเดตวันใหม่',
+      '—',
+      `${formattedDate} (UPH-A: ${uphA}, UPH-B: ${uphB}, UPPH: ${upphAll}, Idle: ${idleTimePct}%)`,
+      'บันทึกผ่านหน้าต่าง Log Daily Result'
+    );
+
     setSelectedDate(formattedDate);
     setIsLogModalOpen(false);
   };
@@ -300,42 +580,107 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       {/* Top Bar Contract: Strictly 3 zones separated by gap-8 */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200 px-6 py-3.5">
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200 px-6 py-3.5 shadow-2xs">
         <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-8">
           {/* Zone 1: Single text element wordmark */}
           <a
             href="#top"
             className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            RF Performance Portal
+            {t.brandTitle}
           </a>
 
-          {/* Zone 2: 4 concise single-line text navigation links */}
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
-            <a
-              href="#summary-table"
-              className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          {/* Zone 2: Concise single-line text navigation links */}
+          <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('dashboard');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'dashboard'
+                  ? 'text-blue-900 font-bold underline underline-offset-4'
+                  : ''
+              }`}
             >
-              Summary Table
-            </a>
-            <a
-              href="#daily-analytics"
-              className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+              {t.navDashboard}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('summary');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'summary'
+                  ? 'text-blue-900 font-bold underline underline-offset-4'
+                  : ''
+              }`}
             >
-              Daily Analytics
-            </a>
-            <a
-              href="#daily-log"
-              className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+              {t.navSummary}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('analytics');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'analytics'
+                  ? 'text-blue-900 font-bold underline underline-offset-4'
+                  : ''
+              }`}
             >
-              Daily Log
-            </a>
+              {t.navAnalytics}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('rca');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'rca'
+                  ? 'text-blue-900 font-bold underline underline-offset-4'
+                  : ''
+              }`}
+            >
+              {t.navRca}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('dailylog');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'dailylog'
+                  ? 'text-blue-900 font-bold underline underline-offset-4'
+                  : ''
+              }`}
+            >
+              {t.navDailyLog}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsHistoryModalOpen(true)}
+              className="inline-flex items-center gap-1.5 hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0 cursor-pointer text-blue-700"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>{t.navHistory}</span>
+              {history.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[11px] font-mono rounded">
+                  {history.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={handleResetData}
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              Reset Default
+              {t.navReset}
             </button>
           </nav>
 
@@ -344,10 +689,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsLogModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#08427a] rounded-lg hover:bg-[#06315c] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#08427a] rounded-lg hover:bg-[#06315c] transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
-              Log Daily Result
+              {t.ctaLogResult}
             </button>
           </div>
         </div>
@@ -358,10 +703,10 @@ export default function App() {
         id="top"
         className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-8 space-y-10"
       >
-        {/* Workspace Control Bar, Auto-Save Panel & Headline */}
+        {/* Workspace Control Bar, Auto-Save Panel, Language Switcher & Headline */}
         <section className="space-y-6">
-          {/* Web Auto-Save Control Bar */}
-          <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* Web Auto-Save & History Quick Button Bar */}
+          <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-xs">
             <div className="flex flex-wrap items-center gap-3">
               {/* Auto-Save Toggle Switch */}
               <button
@@ -377,14 +722,18 @@ export default function App() {
               >
                 <span
                   className={`w-7 h-4 rounded-full p-0.5 transition-colors flex items-center ${
-                    autoSaveEnabled ? 'bg-emerald-600 justify-end' : 'bg-slate-400 justify-start'
+                    autoSaveEnabled
+                      ? 'bg-emerald-600 justify-end'
+                      : 'bg-slate-400 justify-start'
                   }`}
                 >
                   <span className="w-3 h-3 rounded-full bg-white block" />
                 </span>
                 <span>
-                  โหมดบันทึกอัตโนมัติบน Web (Auto-Save):{' '}
-                  <strong>{autoSaveEnabled ? 'เปิดใช้งาน (ON)' : 'ปิดชั่วคราว (OFF)'}</strong>
+                  {t.autoSaveLabel}{' '}
+                  <strong>
+                    {autoSaveEnabled ? t.autoSaveOn : t.autoSaveOff}
+                  </strong>
                 </span>
               </button>
 
@@ -393,25 +742,38 @@ export default function App() {
                 {saveStatus === 'saving' ? (
                   <span className="inline-flex items-center gap-1.5 text-blue-700 font-medium">
                     <Clock className="w-3.5 h-3.5" />
-                    กำลังบันทึกข้อมูลลงเบราว์เซอร์อัตโนมัติ...
+                    {t.savingStatus}
                   </span>
                 ) : saveStatus === 'saved' ? (
                   <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
                     <Check className="w-3.5 h-3.5" />
-                    บันทึกอัตโนมัติล่าสุดเมื่อ{' '}
+                    {t.savedLastAt}{' '}
                     <span className="font-mono font-semibold">{lastSavedAt}</span>
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-2 text-amber-700 font-medium">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    มีการแก้ไขที่ยังไม่ได้บันทึก (โหมด Auto-Save ปิดอยู่)
+                    {t.unsavedWarning}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Right Controls inside Auto-Save Bar */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Right Controls: Audit History Button + Save Now + Inline Edit Toggle + Language Switcher */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Quick History Button */}
+              <button
+                type="button"
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 bg-blue-50/80 hover:bg-blue-100 text-blue-800 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>{t.navHistory}</span>
+                <span className="font-mono font-semibold px-1 py-0.2 bg-blue-200/80 rounded text-[10px]">
+                  {history.length}
+                </span>
+              </button>
+
               {!autoSaveEnabled && (
                 <button
                   type="button"
@@ -419,7 +781,7 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  บันทึกตอนนี้ (Save Now)
+                  {t.saveNowBtn}
                 </button>
               )}
 
@@ -433,41 +795,181 @@ export default function App() {
                 }`}
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                {inlineEditEnabled
-                  ? 'แก้ไขตัวเลขในตารางได้ทันที: เปิด'
-                  : 'แก้ไขตัวเลขในตารางได้ทันที: ปิด'}
+                {inlineEditEnabled ? t.inlineEditOn : t.inlineEditOff}
               </button>
+
+              {/* Language Switcher: ไทย | 中文 | EN */}
+              <div
+                className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200"
+                role="group"
+                aria-label="Language switcher"
+              >
+                <span className="inline-flex items-center gap-1 pl-2 pr-1 text-xs font-medium text-slate-500">
+                  <Globe className="w-3.5 h-3.5 text-slate-500" />
+                  {t.languageLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLang('th')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    lang === 'th'
+                      ? 'bg-[#08427a] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  ไทย
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLang('zh')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    lang === 'zh'
+                      ? 'bg-[#08427a] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  中文
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLang('en')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    lang === 'en'
+                      ? 'bg-[#08427a] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  EN
+                </button>
+              </div>
             </div>
+          </div>
+
+          {/* Segmented View Mode Navigation Bar */}
+          <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/80 rounded-xl border border-slate-300/80 overflow-x-auto shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveView('dashboard')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'dashboard'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 text-blue-700" />
+              <span>{t.navDashboard}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('summary')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'summary'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <TableIcon className="w-4 h-4 text-emerald-700" />
+              <span>{t.navSummary}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('analytics')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'analytics'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-indigo-700" />
+              <span>{t.navAnalytics}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('rca')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'rca'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <GitBranch className="w-4 h-4 text-amber-700" />
+              <span>{t.navRca}</span>
+              <span className="px-1.5 py-0.2 bg-amber-100 text-amber-900 text-[10px] rounded font-mono font-bold">
+                4M1E / 5W
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('dailylog')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'dailylog'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-purple-700" />
+              <span>{t.navDailyLog}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('all')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                activeView === 'all'
+                  ? 'bg-white text-blue-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+              }`}
+            >
+              <Layers className="w-4 h-4 text-slate-700" />
+              <span>
+                {lang === 'th'
+                  ? 'แสดงทั้งหมด (All)'
+                  : lang === 'zh'
+                  ? '展示全部 (All)'
+                  : 'Show All'}
+              </span>
+            </button>
           </div>
 
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 text-xs text-slate-500">
-                <span>Production Line Telemetry</span>
+                <span>{t.kickerTelemetry}</span>
                 <span aria-hidden="true">·</span>
-                <span>October 2026 Cycle</span>
+                <span className="inline-flex items-center gap-1 font-medium text-slate-700">
+                  <Layers className="w-3.5 h-3.5 text-purple-600" />
+                  <span>{monthLabel} Cycle</span>
+                </span>
                 <span aria-hidden="true">·</span>
-                <span>Active Report: {dailyRecord.date}</span>
+                <span>
+                  {t.kickerActiveReport} {dailyRecord.date}
+                </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mt-1 text-balance">
-                RF Performance Summary &amp; Daily Usage Analytics
+                {t.pageHeadline}
               </h1>
             </div>
 
-            {/* Date Selector & CSV Export Controls */}
+            {/* Date Selector, Month badge & CSV Export Controls */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs">
                 <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
                 <label
                   htmlFor="date-select"
                   className="text-xs font-medium text-slate-600 whitespace-nowrap"
                 >
-                  วันที่แสดงผล (Result Date):
+                  {t.resultDateLabel}
                 </label>
                 <select
                   id="date-select"
                   value={dailyRecord.date}
-                  onChange={(e) => setSelectedDate(e.target.value)}
+                  onChange={(e) => {
+                    handleUpdateDate(dailyRecord.date, e.target.value);
+                  }}
                   className="text-xs font-mono font-bold text-slate-900 bg-transparent focus:outline-none cursor-pointer"
                 >
                   {records.map((rec) => (
@@ -481,10 +983,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
               >
                 <Download className="w-3.5 h-3.5" />
-                Download CSV
+                {t.downloadCsvBtn}
               </button>
             </div>
           </div>
@@ -492,7 +994,7 @@ export default function App() {
           {/* Full-Width 4-Column KPI Summary Strip */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* KPI 1: UPH-A */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span className="font-semibold text-slate-700">
                   UPH-A ({dailyRecord.date})
@@ -500,12 +1002,12 @@ export default function App() {
                 {dailyRecord.uphA >= RF_TARGETS.uphA ? (
                   <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    Achieved
+                    {t.statusAchieved}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 font-medium text-amber-700">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Below target
+                    {t.statusBelowTarget}
                   </span>
                 )}
               </div>
@@ -514,7 +1016,9 @@ export default function App() {
                   {dailyRecord.uphA}
                 </div>
                 <div className="text-xs font-mono tabular-nums text-right">
-                  <span className="text-slate-500">Target: {RF_TARGETS.uphA}</span>
+                  <span className="text-slate-500">
+                    {t.targetLabel}: {RF_TARGETS.uphA}
+                  </span>
                   <span className="mx-1.5 text-slate-300">·</span>
                   <span
                     className={`font-bold ${
@@ -523,7 +1027,7 @@ export default function App() {
                         : 'text-red-600'
                     }`}
                   >
-                    Gap{' '}
+                    {t.gapLabel}{' '}
                     {dailyRecord.uphA - RF_TARGETS.uphA > 0
                       ? `+${dailyRecord.uphA - RF_TARGETS.uphA}`
                       : dailyRecord.uphA - RF_TARGETS.uphA}
@@ -531,7 +1035,7 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
-                <span>Oct&apos;2026 MTD: {mtdAverages.uphA}</span>
+                <span>{monthLabel} MTD: {mtdAverages.uphA}</span>
                 <span
                   className={
                     mtdAverages.uphA - RF_TARGETS.uphA >= 0
@@ -539,13 +1043,13 @@ export default function App() {
                       : 'text-red-600'
                   }
                 >
-                  Gap {mtdAverages.uphA - RF_TARGETS.uphA}
+                  {t.gapLabel} {mtdAverages.uphA - RF_TARGETS.uphA}
                 </span>
               </div>
             </div>
 
             {/* KPI 2: UPH-B */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span className="font-semibold text-slate-700">
                   UPH-B ({dailyRecord.date})
@@ -553,12 +1057,12 @@ export default function App() {
                 {dailyRecord.uphB >= RF_TARGETS.uphB ? (
                   <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    Achieved
+                    {t.statusAchieved}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 font-medium text-amber-700">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Below target
+                    {t.statusBelowTarget}
                   </span>
                 )}
               </div>
@@ -567,7 +1071,9 @@ export default function App() {
                   {dailyRecord.uphB}
                 </div>
                 <div className="text-xs font-mono tabular-nums text-right">
-                  <span className="text-slate-500">Target: {RF_TARGETS.uphB}</span>
+                  <span className="text-slate-500">
+                    {t.targetLabel}: {RF_TARGETS.uphB}
+                  </span>
                   <span className="mx-1.5 text-slate-300">·</span>
                   <span
                     className={`font-bold ${
@@ -576,7 +1082,7 @@ export default function App() {
                         : 'text-red-600'
                     }`}
                   >
-                    Gap{' '}
+                    {t.gapLabel}{' '}
                     {dailyRecord.uphB - RF_TARGETS.uphB > 0
                       ? `+${dailyRecord.uphB - RF_TARGETS.uphB}`
                       : dailyRecord.uphB - RF_TARGETS.uphB}
@@ -584,7 +1090,7 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
-                <span>Oct&apos;2026 MTD: {mtdAverages.uphB}</span>
+                <span>{monthLabel} MTD: {mtdAverages.uphB}</span>
                 <span
                   className={
                     mtdAverages.uphB - RF_TARGETS.uphB >= 0
@@ -592,13 +1098,13 @@ export default function App() {
                       : 'text-red-600'
                   }
                 >
-                  Gap {mtdAverages.uphB - RF_TARGETS.uphB}
+                  {t.gapLabel} {mtdAverages.uphB - RF_TARGETS.uphB}
                 </span>
               </div>
             </div>
 
             {/* KPI 3: UPPH All line */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span className="font-semibold text-slate-700">
                   UPPH All line ({dailyRecord.date})
@@ -606,12 +1112,12 @@ export default function App() {
                 {dailyRecord.upphAll >= RF_TARGETS.upphAll ? (
                   <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    Achieved
+                    {t.statusAchieved}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 font-medium text-amber-700">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Below target
+                    {t.statusBelowTarget}
                   </span>
                 )}
               </div>
@@ -621,7 +1127,7 @@ export default function App() {
                 </div>
                 <div className="text-xs font-mono tabular-nums text-right">
                   <span className="text-slate-500">
-                    Target: {RF_TARGETS.upphAll.toFixed(2)}
+                    {t.targetLabel}: {RF_TARGETS.upphAll.toFixed(2)}
                   </span>
                   <span className="mx-1.5 text-slate-300">·</span>
                   <span
@@ -631,22 +1137,23 @@ export default function App() {
                         : 'text-red-600'
                     }`}
                   >
-                    Gap{' '}
+                    {t.gapLabel}{' '}
                     {dailyRecord.upphAll - RF_TARGETS.upphAll >= 0 ? '+' : ''}
                     {(dailyRecord.upphAll - RF_TARGETS.upphAll).toFixed(2)}
                   </span>
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
-                <span>Oct&apos;2026 MTD: {mtdAverages.upphAll.toFixed(2)}</span>
+                <span>{monthLabel} MTD: {mtdAverages.upphAll.toFixed(2)}</span>
                 <span className="text-emerald-700">
-                  Gap +{(mtdAverages.upphAll - RF_TARGETS.upphAll).toFixed(2)}
+                  {t.gapLabel} +
+                  {(mtdAverages.upphAll - RF_TARGETS.upphAll).toFixed(2)}
                 </span>
               </div>
             </div>
 
             {/* KPI 4: Idle Time All line */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span className="font-semibold text-slate-700">
                   Idle Time All line ({dailyRecord.date})
@@ -654,12 +1161,12 @@ export default function App() {
                 {dailyRecord.idleTimePct <= RF_TARGETS.idleTimePct ? (
                   <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    Achieved
+                    {t.statusAchieved}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 font-medium text-amber-700">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Below target
+                    {t.statusBelowTarget}
                   </span>
                 )}
               </div>
@@ -669,7 +1176,7 @@ export default function App() {
                 </div>
                 <div className="text-xs font-mono tabular-nums text-right">
                   <span className="text-slate-500">
-                    Target: ≤{RF_TARGETS.idleTimePct}%
+                    {t.targetLabel}: ≤{RF_TARGETS.idleTimePct}%
                   </span>
                   <span className="mx-1.5 text-slate-300">·</span>
                   <span
@@ -679,7 +1186,7 @@ export default function App() {
                         : 'text-red-600'
                     }`}
                   >
-                    Gap{' '}
+                    {t.gapLabel}{' '}
                     {RF_TARGETS.idleTimePct - dailyRecord.idleTimePct >= 0
                       ? '+'
                       : ''}
@@ -691,9 +1198,9 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
-                <span>Oct&apos;2026 MTD: {mtdAverages.idleTimePct.toFixed(2)}%</span>
+                <span>{monthLabel} MTD: {mtdAverages.idleTimePct.toFixed(2)}%</span>
                 <span className="text-emerald-700">
-                  Gap +
+                  {t.gapLabel} +
                   {(RF_TARGETS.idleTimePct - mtdAverages.idleTimePct).toFixed(2)}%
                 </span>
               </div>
@@ -701,86 +1208,136 @@ export default function App() {
           </div>
         </section>
 
-        {/* Section 1: RF PERFORMANCE SUMMARY TABLE (With Inline Auto-Save Editing) */}
-        <section id="summary-table" className="scroll-mt-20">
-          <PerformanceSummaryTable
-            rows={rows}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            selectedDate={dailyRecord.date}
-            dailyRecord={dailyRecord}
-            onInlineUpdateDaily={(field, value) =>
-              handleUpdateRecordField(dailyRecord.date, field, value)
-            }
-            inlineEditEnabled={inlineEditEnabled}
-            onToggleInlineEdit={() => setInlineEditEnabled((prev) => !prev)}
-          />
-        </section>
+        {/* Section 0: EXECUTIVE DASHBOARD SUMMARY */}
+        {(activeView === 'dashboard' || activeView === 'all') && (
+          <section id="dashboard-summary" className="scroll-mt-20">
+            <DashboardSummaryView
+              lang={lang}
+              selectedDate={dailyRecord.date}
+              monthLabel={monthLabel}
+              dailyRecord={dailyRecord}
+              mtdAverages={mtdAverages}
+              rows={rows}
+              onNavigateToRca={() => {
+                setActiveView('rca');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onNavigateToSummaryTable={() => {
+                setActiveView('summary');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          </section>
+        )}
+
+        {/* Section 1: RF PERFORMANCE SUMMARY TABLE (With In-Table Date and Month Editing) */}
+        {(activeView === 'summary' || activeView === 'all') && (
+          <section id="summary-table" className="scroll-mt-20">
+            <PerformanceSummaryTable
+              lang={lang}
+              rows={rows}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
+              selectedDate={dailyRecord.date}
+              dailyRecord={dailyRecord}
+              monthLabel={monthLabel}
+              availableDates={availableDates}
+              onInlineUpdateDaily={(field, value) =>
+                handleUpdateRecordField(dailyRecord.date, field, value)
+              }
+              onUpdateDate={handleUpdateDate}
+              onUpdateMonth={handleUpdateMonth}
+              inlineEditEnabled={inlineEditEnabled}
+              onToggleInlineEdit={() => setInlineEditEnabled((prev) => !prev)}
+            />
+          </section>
+        )}
 
         {/* Section 2: DAILY USAGE & PERFORMANCE ANALYTICS CHARTS */}
-        <section id="daily-analytics" className="scroll-mt-20">
-          <DailyAnalyticsCharts
-            records={records}
-            selectedDate={dailyRecord.date}
-            onSelectDate={setSelectedDate}
-            summaryRows={rows}
-            mtdAverages={mtdAverages}
-          />
-        </section>
+        {(activeView === 'analytics' || activeView === 'all') && (
+          <section id="daily-analytics" className="scroll-mt-20">
+            <DailyAnalyticsCharts
+              lang={lang}
+              records={records}
+              selectedDate={dailyRecord.date}
+              onSelectDate={setSelectedDate}
+              summaryRows={rows}
+              mtdAverages={mtdAverages}
+            />
+          </section>
+        )}
 
-        {/* Section 3: DAILY HISTORICAL LOG TABLE (With Live Auto-Save Cell Editing) */}
-        <section id="daily-log" className="scroll-mt-20 space-y-4">
+        {/* Section 3: ROOT CAUSE ANALYSIS (RCA) - 4M1E, 5 WHYS, PARETO, CAPA */}
+        {(activeView === 'rca' || activeView === 'all') && (
+          <section id="root-cause-analysis" className="scroll-mt-20">
+            <RootCauseAnalysisView
+              lang={lang}
+              selectedDate={dailyRecord.date}
+              dailyRecord={dailyRecord}
+              monthLabel={monthLabel}
+            />
+          </section>
+        )}
+
+        {/* Section 4: DAILY HISTORICAL LOG TABLE (With Live In-Table Editing) */}
+        {(activeView === 'dailylog' || activeView === 'all') && (
+          <section id="daily-log" className="scroll-mt-20 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
               <p className="text-xs font-medium text-blue-700">
-                Daily Operations Log · ประวัติข้อมูลรายวันพร้อมบันทึกอัตโนมัติ (Oct&apos;2026)
+                {t.dailyLogKicker}
               </p>
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">
-                ตารางบันทึกผลการใช้งานรายวัน (01/10/2026 – {records[records.length - 1]?.date})
+                {t.dailyLogTitle(records[records.length - 1]?.date || '10/10/2026')}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                แก้ไขตัวเลขในแต่ละแถวได้โดยตรง ระบบจะบันทึกอัตโนมัติ (Auto-Save) และคำนวณกราฟพร้อมค่าเฉลี่ย MTD ทันที
+                {t.dailyLogSubtitle}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsLogModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              เพิ่มวันใหม่ (Add Daily Row)
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>{t.navHistory} ({history.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsLogModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#08427a] rounded-lg hover:bg-[#06315c] transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {t.addDailyRowBtn}
+              </button>
+            </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs sm:text-sm">
                 <thead>
                   <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
-                    <th className="py-3 px-4">Date</th>
-                    <th className="py-3 px-4 text-right">
-                      UPH-A (เป้า 172)
-                    </th>
-                    <th className="py-3 px-4 text-right">
-                      UPH-B (เป้า 115)
-                    </th>
-                    <th className="py-3 px-4 text-right">
-                      UPH All line (เป้า 144)
-                    </th>
-                    <th className="py-3 px-4 text-right">
-                      UPPH All line (เป้า 0.21)
-                    </th>
-                    <th className="py-3 px-4 text-right">
-                      Idle Time (เป้า ≤5%)
-                    </th>
-                    <th className="py-3 px-4">หมายเหตุการเดินสายการผลิต (Shift Note)</th>
+                    <th className="py-3 px-4">{t.colDate}</th>
+                    <th className="py-3 px-4 text-right">{t.colUphA}</th>
+                    <th className="py-3 px-4 text-right">{t.colUphB}</th>
+                    <th className="py-3 px-4 text-right">{t.colUphAll}</th>
+                    <th className="py-3 px-4 text-right">{t.colUpphAll}</th>
+                    <th className="py-3 px-4 text-right">{t.colIdleTime}</th>
+                    <th className="py-3 px-4">{t.colShiftNote}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {records.map((rec) => {
                     const isSelected = rec.date === dailyRecord.date;
+                    const displayShiftNote = getLocalizedShiftNote(
+                      rec.id,
+                      rec.shiftNote,
+                      lang
+                    );
                     return (
                       <tr
                         key={rec.id}
@@ -791,11 +1348,29 @@ export default function App() {
                             : 'hover:bg-slate-50'
                         }`}
                       >
-                        <td className="py-2.5 px-4 font-mono font-semibold text-slate-900 whitespace-nowrap">
-                          {rec.date}
+                        <td
+                          className="py-2.5 px-4 font-mono font-semibold text-slate-900 whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {inlineEditEnabled ? (
+                            <input
+                              type="text"
+                              value={rec.date}
+                              onChange={(e) =>
+                                handleUpdateRecordField(
+                                  rec.date,
+                                  'date',
+                                  e.target.value
+                                )
+                              }
+                              className="w-24 px-1.5 py-1 text-xs font-mono font-bold text-blue-900 bg-white border border-slate-300 rounded focus:outline-none focus:border-blue-600"
+                            />
+                          ) : (
+                            <span>{rec.date}</span>
+                          )}
                           {isSelected && (
                             <span className="ml-2 text-[11px] font-sans font-normal text-blue-700">
-                              · กำลังแสดงผล
+                              · {t.activeBadge}
                             </span>
                           )}
                         </td>
@@ -928,7 +1503,7 @@ export default function App() {
                           {inlineEditEnabled ? (
                             <input
                               type="text"
-                              value={rec.shiftNote}
+                              value={displayShiftNote}
                               onChange={(e) =>
                                 handleUpdateRecordField(
                                   rec.date,
@@ -939,7 +1514,7 @@ export default function App() {
                               className="w-full min-w-[200px] px-2 py-1 text-xs text-slate-700 bg-white border border-slate-200 rounded focus:outline-none focus:border-blue-600"
                             />
                           ) : (
-                            rec.shiftNote
+                            displayShiftNote
                           )}
                         </td>
                       </tr>
@@ -949,7 +1524,12 @@ export default function App() {
                 <tfoot>
                   <tr className="bg-slate-50 border-t-2 border-slate-300 font-semibold text-slate-900">
                     <td className="py-3 px-4 font-mono">
-                      Oct&apos;2026 MTD Avg ({mtdAverages.daysCount} วัน)
+                      <div className="flex items-center gap-1.5">
+                        <span>{monthLabel}</span>
+                        <span className="font-sans font-normal text-slate-600 text-xs">
+                          MTD ({mtdAverages.daysCount} วัน)
+                        </span>
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums">
                       {mtdAverages.uphA}{' '}
@@ -981,7 +1561,7 @@ export default function App() {
                       %)
                     </td>
                     <td className="py-3 px-4 text-xs text-slate-500 font-normal">
-                      คำนวณค่าเฉลี่ยสะสมอัตโนมัติถึงวันที่ {dailyRecord.date}
+                      {t.mtdAvgNote(dailyRecord.date)}
                     </td>
                   </tr>
                 </tfoot>
@@ -989,22 +1569,32 @@ export default function App() {
             </div>
           </div>
         </section>
+        )}
       </main>
 
       {/* Quiet Footer */}
       <footer className="border-t border-slate-200 bg-white px-6 py-4 mt-12">
         <div className="max-w-[1360px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
           <span>
-            RF Performance Summary &amp; Daily Usage Analytics · Auto-Save{' '}
-            {autoSaveEnabled ? 'Active' : 'Paused'} (Saved {lastSavedAt})
+            {t.footerTitle} ·{' '}
+            {autoSaveEnabled ? t.footerAutoSaveActive : t.footerAutoSavePaused}{' '}
+            ({t.footerSavedAt} {lastSavedAt})
           </span>
           <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setIsHistoryModalOpen(true)}
+              className="hover:text-blue-700 transition-colors cursor-pointer"
+            >
+              {t.navHistory} ({history.length})
+            </button>
+            <span aria-hidden="true">·</span>
             <button
               type="button"
               onClick={handleExportCSV}
               className="hover:text-slate-900 transition-colors cursor-pointer"
             >
-              Export CSV Report
+              {t.exportCsvFooter}
             </button>
             <span aria-hidden="true">·</span>
             <button
@@ -1013,7 +1603,7 @@ export default function App() {
               className="inline-flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
-              Reset Default Data
+              {t.resetDefaultFooter}
             </button>
           </div>
         </div>
@@ -1026,10 +1616,10 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  บันทึกผลการใช้งานรายวัน (Log Daily RF Result)
+                  {t.modalTitle}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  ข้อมูลที่เพิ่มจะถูกจัดเก็บในโหมดบันทึกอัตโนมัติบน Web ทันที
+                  {t.modalSubtitle}
                 </p>
               </div>
               <button
@@ -1045,7 +1635,7 @@ export default function App() {
             <form onSubmit={handleSaveDailyRecord} className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  วันที่ปฏิบัติงาน (Date)
+                  {t.modalDateLabel}
                 </label>
                 <input
                   type="date"
@@ -1059,7 +1649,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    UPH-A (Target: 172)
+                    UPH-A ({t.targetLabel}: 172)
                   </label>
                   <input
                     type="number"
@@ -1073,7 +1663,7 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    UPH-B (Target: 115)
+                    UPH-B ({t.targetLabel}: 115)
                   </label>
                   <input
                     type="number"
@@ -1090,7 +1680,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    UPPH All line (Target: 0.21)
+                    UPPH All line ({t.targetLabel}: 0.21)
                   </label>
                   <input
                     type="number"
@@ -1105,7 +1695,7 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Idle Time % (Target: ≤5%)
+                    Idle Time % ({t.targetLabel}: ≤5%)
                   </label>
                   <input
                     type="number"
@@ -1122,7 +1712,7 @@ export default function App() {
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  หมายเหตุกะการทำงาน (Shift Note)
+                  {t.modalShiftNoteLabel}
                 </label>
                 <input
                   type="text"
@@ -1138,19 +1728,29 @@ export default function App() {
                   onClick={() => setIsLogModalOpen(false)}
                   className="px-4 py-2 font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
                 >
-                  Cancel
+                  {t.modalCancelBtn}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 font-semibold text-white bg-[#08427a] rounded-lg hover:bg-[#06315c] transition-colors cursor-pointer"
                 >
-                  Save Daily Result
+                  {t.modalSaveBtn}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Modal for Update & Audit History */}
+      <UpdateHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        lang={lang}
+        history={history}
+        onClearHistory={handleClearHistory}
+        onRevertEntry={handleRevertHistoryEntry}
+      />
     </div>
   );
 }

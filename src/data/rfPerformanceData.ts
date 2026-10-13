@@ -13,6 +13,18 @@ export interface DailyRFRecord {
   shiftNote: string;
 }
 
+export interface UpdateHistoryEntry {
+  id: string;
+  timestamp: string; // e.g. "13/10/2026 09:20:15"
+  isoTimestamp: string;
+  targetDate: string; // e.g. "10/10/2026"
+  actionType: 'date_change' | 'month_change' | 'metric_update' | 'record_add' | 'revert';
+  field: string;
+  oldValue: string;
+  newValue: string;
+  note?: string;
+}
+
 export interface PerformanceRow {
   id: string;
   periodGroup: 'daily' | 'mtd';
@@ -183,7 +195,8 @@ export const INITIAL_DAILY_RECORDS: DailyRFRecord[] = [
 
 export function computeSummaryRows(
   records: DailyRFRecord[],
-  selectedDate: string
+  selectedDate: string,
+  customMonthLabel: string = "Oct'2026"
 ): {
   dailyRecord: DailyRFRecord;
   mtdAverages: {
@@ -322,7 +335,7 @@ export function computeSummaryRows(
     {
       id: 'mtd-uph-all',
       periodGroup: 'mtd',
-      periodLabel: "Oct'2026",
+      periodLabel: customMonthLabel,
       topic: 'UPH All line (MTD)',
       topicDescription: 'Month-to-Date Average UPH Across All Lines',
       targetDisplay: `${RF_TARGETS.uphAll}`,
@@ -338,7 +351,7 @@ export function computeSummaryRows(
     {
       id: 'mtd-uph-a',
       periodGroup: 'mtd',
-      periodLabel: "Oct'2026",
+      periodLabel: customMonthLabel,
       topic: 'UPH-A (MTD)',
       topicDescription: 'Month-to-Date Average UPH — Line A',
       targetDisplay: `${RF_TARGETS.uphA}`,
@@ -354,7 +367,7 @@ export function computeSummaryRows(
     {
       id: 'mtd-uph-b',
       periodGroup: 'mtd',
-      periodLabel: "Oct'2026",
+      periodLabel: customMonthLabel,
       topic: 'UPH-B (MTD)',
       topicDescription: 'Month-to-Date Average UPH — Line B',
       targetDisplay: `${RF_TARGETS.uphB}`,
@@ -370,7 +383,7 @@ export function computeSummaryRows(
     {
       id: 'mtd-upph-all',
       periodGroup: 'mtd',
-      periodLabel: "Oct'2026",
+      periodLabel: customMonthLabel,
       topic: 'UPPH All line (MTD)',
       topicDescription: 'Month-to-Date Units Per Person Hour',
       targetDisplay: RF_TARGETS.upphAll.toFixed(2),
@@ -386,7 +399,7 @@ export function computeSummaryRows(
     {
       id: 'mtd-idle-all',
       periodGroup: 'mtd',
-      periodLabel: "Oct'2026",
+      periodLabel: customMonthLabel,
       topic: 'Idle Time All line (MTD)',
       topicDescription: 'Month-to-Date Idle Time Ratio (Target ≤ 5%)',
       targetDisplay: `≤${RF_TARGETS.idleTimePct}%`,

@@ -1,8 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PerformanceRow, DailyRFRecord } from '../data/rfPerformanceData';
-import { CheckCircle2, AlertTriangle, Edit3 } from 'lucide-react';
+import { Language, TRANSLATIONS } from '../i18n/translations';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Edit3,
+  Calendar,
+  Check,
+  Layers,
+} from 'lucide-react';
 
 interface PerformanceSummaryTableProps {
+  lang: Language;
   rows: PerformanceRow[];
   statusFilter: 'all' | 'Achieved' | 'Below target';
   onStatusFilterChange: (filter: 'all' | 'Achieved' | 'Below target') => void;
@@ -10,15 +19,20 @@ interface PerformanceSummaryTableProps {
   onSearchQueryChange: (q: string) => void;
   selectedDate: string;
   dailyRecord: DailyRFRecord;
+  monthLabel: string;
+  availableDates: string[];
   onInlineUpdateDaily: (
     field: 'uphA' | 'uphB' | 'upphAll' | 'idleTimePct',
     value: number
   ) => void;
+  onUpdateDate: (oldDate: string, newDate: string) => void;
+  onUpdateMonth: (oldMonth: string, newMonth: string) => void;
   inlineEditEnabled: boolean;
   onToggleInlineEdit: () => void;
 }
 
 export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = ({
+  lang,
   rows,
   statusFilter,
   onStatusFilterChange,
@@ -26,23 +40,53 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
   onSearchQueryChange,
   selectedDate,
   dailyRecord,
+  monthLabel,
+  availableDates,
   onInlineUpdateDaily,
+  onUpdateDate,
+  onUpdateMonth,
   inlineEditEnabled,
   onToggleInlineEdit,
 }) => {
+  const t = TRANSLATIONS[lang];
+
+  // Inline editing states for Date and Month
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [customDateInput, setCustomDateInput] = useState(selectedDate);
+  const [isEditingMonth, setIsEditingMonth] = useState(false);
+  const [customMonthInput, setCustomMonthInput] = useState(monthLabel);
+
   const filteredRows = rows.filter((row) => {
     const matchesStatus =
       statusFilter === 'all' ? true : row.status === statusFilter;
+    const localizedDesc =
+      t.topicDescriptions[row.topic] || row.topicDescription;
     const matchesQuery =
       !searchQuery.trim() ||
       row.topic.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      row.topicDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      localizedDesc.toLowerCase().includes(searchQuery.toLowerCase()) ||
       row.periodLabel.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesStatus && matchesQuery;
   });
 
   const dailyRows = filteredRows.filter((r) => r.periodGroup === 'daily');
   const mtdRows = filteredRows.filter((r) => r.periodGroup === 'mtd');
+
+  const handleSaveDate = () => {
+    const trimmed = customDateInput.trim();
+    if (trimmed && trimmed !== selectedDate) {
+      onUpdateDate(selectedDate, trimmed);
+    }
+    setIsEditingDate(false);
+  };
+
+  const handleSaveMonth = () => {
+    const trimmed = customMonthInput.trim();
+    if (trimmed && trimmed !== monthLabel) {
+      onUpdateMonth(monthLabel, trimmed);
+    }
+    setIsEditingMonth(false);
+  };
 
   const renderActualCell = (row: PerformanceRow) => {
     if (!inlineEditEnabled || row.periodGroup !== 'daily') {
@@ -128,15 +172,15 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
       {/* Table Title Banner matching the executive dark-blue header in the user's screenshot */}
       <div className="bg-[#08427a] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg sm:text-xl font-bold tracking-wide text-white">
-            RF PERFORMANCE SUMMARY
+            {t.summaryTableTitle}
           </h2>
           <p className="text-xs text-sky-100/90 mt-0.5">
-            ตารางสรุปผลการดำเนินงานสายการผลิต RF ประจำวันที่ {selectedDate} และยอดสะสมรายเดือน (Oct&apos;2026 MTD)
+            {t.summaryTableSub(selectedDate)}
           </p>
         </div>
 
@@ -152,16 +196,14 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
             }`}
           >
             <Edit3 className="w-3.5 h-3.5" />
-            {inlineEditEnabled
-              ? 'กำลังแก้ไขตัวเลขในตาราง (Auto-Save)'
-              : 'แก้ไขตัวเลขในตาราง'}
+            {inlineEditEnabled ? t.inlineEditActiveBtn : t.inlineEditToggleBtn}
           </button>
 
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
-            placeholder="ค้นหาหัวข้อ (เช่น UPH-A, Idle)..."
+            placeholder={t.searchPlaceholder}
             className="px-3 py-1.5 text-xs bg-white/10 text-white placeholder:text-sky-200/75 border border-white/20 rounded-lg focus:outline-none focus:border-white"
           />
           <div className="flex items-center gap-1 p-1 bg-[#06315c] rounded-lg border border-white/15">
@@ -174,7 +216,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                   : 'text-sky-100 hover:text-white'
               }`}
             >
-              ทั้งหมด ({rows.length})
+              {t.allFilter} ({rows.length})
             </button>
             <button
               type="button"
@@ -207,20 +249,22 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="bg-[#0e6ba8] text-white text-xs sm:text-sm font-semibold border-b border-slate-300">
-              <th className="py-3 px-4 border-r border-white/20 text-center w-40">
-                Date
+              <th className="py-3 px-4 border-r border-white/20 text-center w-48">
+                {t.colDate}
               </th>
-              <th className="py-3 px-5 border-r border-white/20">Topic</th>
+              <th className="py-3 px-5 border-r border-white/20">
+                {t.colTopic}
+              </th>
               <th className="py-3 px-4 border-r border-white/20 text-center w-28">
-                Target
+                {t.colTarget}
               </th>
               <th className="py-3 px-4 border-r border-white/20 text-center w-32">
-                Actual
+                {t.colActual}
               </th>
               <th className="py-3 px-4 border-r border-white/20 text-center w-28">
-                Gap
+                {t.colGap}
               </th>
-              <th className="py-3 px-5 text-center w-44">Status</th>
+              <th className="py-3 px-5 text-center w-52">{t.colStatus}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-sm">
@@ -230,7 +274,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                   colSpan={6}
                   className="py-10 px-6 text-center text-slate-500 text-sm"
                 >
-                  ไม่พบรายการตัวชี้วัดที่ตรงกับเงื่อนไขการกรอง
+                  {t.noMatchingRows}
                 </td>
               </tr>
             ) : (
@@ -244,14 +288,73 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                     {idx === 0 && (
                       <td
                         rowSpan={dailyRows.length}
-                        className="py-4 px-4 text-center font-bold text-slate-900 bg-slate-50/60 border-r border-slate-200 align-middle"
+                        className="py-4 px-3 text-center font-bold text-slate-900 bg-slate-50/70 border-r border-slate-200 align-middle"
                       >
-                        <div className="text-xs uppercase tracking-wider text-slate-500 font-sans">
-                          Result
+                        <div className="flex items-center justify-center gap-1 text-xs uppercase tracking-wider text-slate-500 font-sans">
+                          <span>{t.resultLabel}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomDateInput(selectedDate);
+                              setIsEditingDate((prev) => !prev);
+                            }}
+                            className="p-0.5 text-blue-600 hover:text-blue-800 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                            title={t.editDateTooltip}
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <div className="font-mono text-sm sm:text-base text-slate-900 mt-0.5">
-                          {selectedDate}
-                        </div>
+
+                        {/* Editable Date in cell */}
+                        {isEditingDate || inlineEditEnabled ? (
+                          <div className="mt-1 space-y-1">
+                            <select
+                              value={selectedDate}
+                              onChange={(e) => {
+                                onUpdateDate(selectedDate, e.target.value);
+                                setCustomDateInput(e.target.value);
+                              }}
+                              className="w-full text-xs font-mono font-bold text-blue-900 bg-white border border-blue-400 rounded px-1.5 py-1 focus:outline-none cursor-pointer"
+                            >
+                              {availableDates.map((d) => (
+                                <option key={d} value={d}>
+                                  {d}
+                                </option>
+                              ))}
+                            </select>
+
+                            <div className="flex items-center gap-1 justify-center">
+                              <input
+                                type="text"
+                                value={customDateInput}
+                                onChange={(e) =>
+                                  setCustomDateInput(e.target.value)
+                                }
+                                placeholder="DD/MM/YYYY"
+                                className="w-24 text-center text-xs font-mono bg-white border border-slate-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-600"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleSaveDate}
+                                className="p-1 bg-blue-600 hover:bg-blue-700 text-white rounded cursor-pointer"
+                                title={t.saveDateBtn}
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => {
+                              setCustomDateInput(selectedDate);
+                              setIsEditingDate(true);
+                            }}
+                            className="font-mono text-sm sm:text-base text-slate-900 mt-0.5 cursor-pointer hover:text-blue-700 hover:underline"
+                            title={t.editDateTooltip}
+                          >
+                            {selectedDate}
+                          </div>
+                        )}
                       </td>
                     )}
                     <td className="py-3 px-5 border-r border-slate-200">
@@ -259,7 +362,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                         {row.topic}
                       </div>
                       <div className="text-xs text-slate-500">
-                        {row.topicDescription}
+                        {t.topicDescriptions[row.topic] || row.topicDescription}
                       </div>
                     </td>
                     <td className="py-3 px-4 border-r border-slate-200 text-center font-mono font-bold text-slate-900 tabular-nums">
@@ -282,7 +385,11 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                         ) : (
                           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                         )}
-                        <span>{row.status}</span>
+                        <span>
+                          {row.status === 'Achieved'
+                            ? t.statusAchieved
+                            : t.statusBelowTarget}
+                        </span>
                       </span>
                     </td>
                   </tr>
@@ -302,14 +409,52 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                     {idx === 0 && (
                       <td
                         rowSpan={mtdRows.length}
-                        className="py-4 px-4 text-center font-bold text-slate-900 bg-slate-50/60 border-r border-slate-200 align-middle"
+                        className="py-4 px-3 text-center font-bold text-slate-900 bg-slate-50/70 border-r border-slate-200 align-middle"
                       >
-                        <div className="font-mono text-sm sm:text-base text-slate-900">
-                          Oct&apos;2026
-                        </div>
-                        <div className="text-xs text-slate-500 font-normal mt-0.5">
-                          Month-to-Date
-                        </div>
+                        {/* Editable Month in cell */}
+                        {isEditingMonth || inlineEditEnabled ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 justify-center">
+                              <input
+                                type="text"
+                                value={customMonthInput}
+                                onChange={(e) =>
+                                  setCustomMonthInput(e.target.value)
+                                }
+                                placeholder="Oct'2026"
+                                className="w-24 text-center text-xs font-mono font-bold bg-white border border-purple-400 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleSaveMonth}
+                                className="p-1 bg-purple-600 hover:bg-purple-700 text-white rounded cursor-pointer"
+                                title={t.saveMonthBtn}
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              {t.mtdSubLabel}
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => {
+                              setCustomMonthInput(monthLabel);
+                              setIsEditingMonth(true);
+                            }}
+                            className="group cursor-pointer"
+                            title={t.editMonthTooltip}
+                          >
+                            <div className="flex items-center justify-center gap-1 font-mono text-sm sm:text-base text-slate-900 group-hover:text-purple-700 group-hover:underline">
+                              <span>{monthLabel}</span>
+                              <Layers className="w-3.5 h-3.5 text-purple-600 opacity-60 group-hover:opacity-100" />
+                            </div>
+                            <div className="text-xs text-slate-500 font-normal mt-0.5">
+                              {t.mtdSubLabel}
+                            </div>
+                          </div>
+                        )}
                       </td>
                     )}
                     <td className="py-3 px-5 border-r border-slate-200">
@@ -317,7 +462,7 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                         {row.topic}
                       </div>
                       <div className="text-xs text-slate-500">
-                        {row.topicDescription}
+                        {t.topicDescriptions[row.topic] || row.topicDescription}
                       </div>
                     </td>
                     <td className="py-3 px-4 border-r border-slate-200 text-center font-mono font-bold text-slate-900 tabular-nums">
@@ -340,7 +485,11 @@ export const PerformanceSummaryTable: React.FC<PerformanceSummaryTableProps> = (
                         ) : (
                           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                         )}
-                        <span>{row.status}</span>
+                        <span>
+                          {row.status === 'Achieved'
+                            ? t.statusAchieved
+                            : t.statusBelowTarget}
+                        </span>
                       </span>
                     </td>
                   </tr>
